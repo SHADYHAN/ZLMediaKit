@@ -35,6 +35,10 @@ extern "C" {
 
 namespace mediakit {
 
+// 辅助函数声明
+std::string ffmpeg_err(int errnum);
+std::unique_ptr<AVPacket, void (*)(AVPacket *)> alloc_av_packet();
+
 class FFmpegFrame {
 public:
     using Ptr = std::shared_ptr<FFmpegFrame>;

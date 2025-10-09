@@ -23,6 +23,10 @@
 #include "TS/TSMediaSourceMuxer.h"
 #include "FMP4/FMP4MediaSourceMuxer.h"
 
+#if defined(ENABLE_FFMPEG)
+#include "Codec/OpusEncoder.h"
+#endif
+
 namespace mediakit {
 
 class MultiMediaSourceMuxer : public MediaSourceEventInterceptor, public MediaSink, public std::enable_shared_from_this<MultiMediaSourceMuxer>{
@@ -272,6 +276,15 @@ private:
     HlsFMP4Recorder::Ptr _hls_fmp4;
     toolkit::EventPoller::Ptr _poller;
     RingType::Ptr _ring;
+
+#if defined(ENABLE_FFMPEG)
+    // 音频转码相关
+    bool _enable_audio_transcode = false;
+    AudioTranscoder::Ptr _audio_transcoder;
+    Track::Ptr _transcoded_audio_track;
+    
+    void createAudioTranscoder(const Track::Ptr &track);
+#endif
 
     // 对象个数统计  [AUTO-TRANSLATED:3b43e8c2]
     // Object count statistics

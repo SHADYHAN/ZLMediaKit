@@ -243,6 +243,16 @@ MultiMediaSourceMuxer::MultiMediaSourceMuxer(const MediaTuple& tuple, float dur_
     // Audio related settings
     enableAudio(option.enable_audio);
     enableMuteAudio(option.add_mute_audio);
+
+#if defined(ENABLE_FFMPEG)
+    // 读取音频转码配置
+    GET_CONFIG(int, enable_transcode, Protocol::kEnableAudioTranscode);
+    _enable_audio_transcode = enable_transcode;
+    
+    if (_enable_audio_transcode) {
+        InfoL << "Audio transcoding enabled for: " << shortUrl();
+    }
+#endif
 }
 
 void MultiMediaSourceMuxer::setMediaListener(const std::weak_ptr<MediaSourceEvent> &listener) {
@@ -623,13 +633,40 @@ bool MultiMediaSourceMuxer::onTrackReady(const Track::Ptr &track) {
         stamp.setPlayBack();
     }
 
+#if defined(ENABLE_FFMPEG)
+    // 如果启用了音频转码，且是 AAC 音频轨道
+    if (_enable_audio_transcode && 
+        track->getTrackType() == TrackAudio && 
+        track->getCodecId() == CodecAAC) {
+        try {
+            createAudioTranscoder(track);
+            // 转码成功后，RTSP 将使用 Opus，所以这里不添加 AAC track 到 RTSP
+            InfoL << "Audio transcoding enabled, RTSP will use Opus instead of AAC";
+        } catch (std::exception &ex) {
+            WarnL << "Failed to create audio transcoder: " << ex.what();
+            _enable_audio_transcode = false;
+        }
+    }
+#endif
+
     bool ret = false;
     if (_rtmp) {
         ret = _rtmp->addTrack(track) ? true : ret;
     }
+    
+    // 如果启用了音频转码且是 AAC，不要将 AAC 添加到 RTSP（因为会用 Opus）
+#if defined(ENABLE_FFMPEG)
+    bool skip_rtsp_aac = _enable_audio_transcode && 
+                         track->getTrackType() == TrackAudio && 
+                         track->getCodecId() == CodecAAC;
+    if (_rtsp && !skip_rtsp_aac) {
+        ret = _rtsp->addTrack(track) ? true : ret;
+    }
+#else
     if (_rtsp) {
         ret = _rtsp->addTrack(track) ? true : ret;
     }
+#endif
     if (_ts) {
         ret = _ts->addTrack(track) ? true : ret;
     }
@@ -762,13 +799,34 @@ bool MultiMediaSourceMuxer::onTrackFrame(const Frame::Ptr &frame_in) {
 
 bool MultiMediaSourceMuxer::onTrackFrame_l(const Frame::Ptr &frame_in) {
     auto frame = frame_in;
+    
+#if defined(ENABLE_FFMPEG)
+    // 音频转码处理：输入原始 AAC 帧到转码器
+    if (_audio_transcoder && 
+        frame->getTrackType() == TrackAudio && 
+        frame->getCodecId() == CodecAAC) {
+        _audio_transcoder->inputFrame(frame);
+    }
+#endif
+    
     bool ret = false;
     if (_rtmp) {
         ret = _rtmp->inputFrame(frame) ? true : ret;
     }
+    
+    // 如果启用了音频转码且是 AAC 帧，不要将 AAC 发送到 RTSP（因为会用 Opus）
+#if defined(ENABLE_FFMPEG)
+    bool skip_rtsp_aac = _audio_transcoder && 
+                         frame->getTrackType() == TrackAudio && 
+                         frame->getCodecId() == CodecAAC;
+    if (_rtsp && !skip_rtsp_aac) {
+        ret = _rtsp->inputFrame(frame) ? true : ret;
+    }
+#else
     if (_rtsp) {
         ret = _rtsp->inputFrame(frame) ? true : ret;
     }
+#endif
     if (_ts) {
         ret = _ts->inputFrame(frame) ? true : ret;
     }
@@ -832,5 +890,43 @@ bool MultiMediaSourceMuxer::isEnabled(){
     }
     return _is_enable;
 }
+
+#if defined(ENABLE_FFMPEG)
+void MultiMediaSourceMuxer::createAudioTranscoder(const Track::Ptr &track) {
+    // 读取转码参数
+    GET_CONFIG(int, bitrate, Protocol::kAudioTranscodeBitrate);
+    GET_CONFIG(int, sample_rate, Protocol::kAudioTranscodeSampleRate);
+    GET_CONFIG(int, channels, Protocol::kAudioTranscodeChannels);
+    
+    InfoL << "Creating AudioTranscoder for: " << shortUrl()
+          << ", AAC → Opus, " << sample_rate << "Hz, " 
+          << channels << "ch, " << bitrate << "bps";
+    
+    // 创建转码器
+    _audio_transcoder = std::make_shared<AudioTranscoder>(
+        track, sample_rate, channels, bitrate
+    );
+    
+    // 获取转码后的 Opus Track
+    _transcoded_audio_track = _audio_transcoder->getOutputTrack();
+    
+    // 将转码后的 Opus Track 添加到各个 Muxer
+    // 注意：只添加到需要 Opus 的协议（主要是 WebRTC）
+    if (_rtsp && _transcoded_audio_track) {
+        // RTSP 也支持 Opus，添加转码后的 track
+        _rtsp->addTrack(_transcoded_audio_track);
+    }
+    
+    // 设置转码输出回调：将 Opus 帧分发到各个 Muxer
+    _audio_transcoder->setOnOutput([this](const Frame::Ptr &opus_frame) {
+        // 将 Opus 帧输出到 RTSP（用于 WebRTC）
+        if (_rtsp) {
+            _rtsp->inputFrame(opus_frame);
+        }
+    });
+    
+    InfoL << "AudioTranscoder created successfully for: " << shortUrl();
+}
+#endif
 
 }//namespace mediakit

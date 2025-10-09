@@ -137,6 +137,12 @@ const string kRtmpDemand = string(kFieldName) + "rtmp_demand";
 const string kTSDemand = string(kFieldName) + "ts_demand";
 const string kFMP4Demand = string(kFieldName) + "fmp4_demand";
 
+// 音频转码配置
+const string kEnableAudioTranscode = string(kFieldName) + "enable_audio_transcode";
+const string kAudioTranscodeBitrate = string(kFieldName) + "audio_transcode_bitrate";
+const string kAudioTranscodeSampleRate = string(kFieldName) + "audio_transcode_sample_rate";
+const string kAudioTranscodeChannels = string(kFieldName) + "audio_transcode_channels";
+
 static onceToken token([]() {
     mINI::Instance()[kModifyStamp] = (int)ProtocolOption::kModifyStampRelative;
     mINI::Instance()[kEnableAudio] = 1;
@@ -164,6 +170,12 @@ static onceToken token([]() {
     mINI::Instance()[kRtmpDemand] = 0;
     mINI::Instance()[kTSDemand] = 0;
     mINI::Instance()[kFMP4Demand] = 0;
+
+    // 音频转码默认配置
+    mINI::Instance()[kEnableAudioTranscode] = 0;        // 默认关闭
+    mINI::Instance()[kAudioTranscodeBitrate] = 64000;   // 64kbps
+    mINI::Instance()[kAudioTranscodeSampleRate] = 48000; // 48kHz
+    mINI::Instance()[kAudioTranscodeChannels] = 2;      // 立体声
 });
 } // !Protocol
 

@@ -334,6 +334,13 @@ extern const std::string kRtspDemand;
 extern const std::string kRtmpDemand;
 extern const std::string kTSDemand;
 extern const std::string kFMP4Demand;
+
+// 音频转码配置  [AUTO-TRANSLATED:audio_transcode]
+// Audio transcoding configuration
+extern const std::string kEnableAudioTranscode;
+extern const std::string kAudioTranscodeBitrate;
+extern const std::string kAudioTranscodeSampleRate;
+extern const std::string kAudioTranscodeChannels;
 } // !Protocol
 
 // //////////HTTP配置///////////  [AUTO-TRANSLATED:a281d694]

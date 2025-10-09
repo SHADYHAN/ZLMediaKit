@@ -24,7 +24,7 @@ using namespace toolkit;
 
 namespace mediakit {
 
-static string ffmpeg_err(int errnum) {
+string ffmpeg_err(int errnum) {
     char errbuf[AV_ERROR_MAX_STRING_SIZE];
     av_strerror(errnum, errbuf, AV_ERROR_MAX_STRING_SIZE);
     return errbuf;
