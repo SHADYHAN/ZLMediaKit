@@ -1,0 +1,971 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ZLMediaKit TURN 中继测试工具</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 20px;
+            min-height: 100vh;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        
+        .header h1 {
+            font-size: 32px;
+            margin-bottom: 10px;
+        }
+        
+        .header p {
+            font-size: 14px;
+            opacity: 0.9;
+        }
+        
+        .content {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            padding: 20px;
+        }
+        
+        .panel {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 20px;
+        }
+        
+        .panel h2 {
+            color: #333;
+            margin-bottom: 15px;
+            font-size: 20px;
+            border-bottom: 2px solid #667eea;
+            padding-bottom: 10px;
+        }
+        
+        .config-section {
+            margin-bottom: 15px;
+        }
+        
+        .config-section label {
+            display: block;
+            color: #555;
+            margin-bottom: 5px;
+            font-weight: 600;
+        }
+        
+        .config-section input,
+        .config-section select {
+            width: 100%;
+            padding: 10px;
+            border: 2px solid #e0e0e0;
+            border-radius: 5px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+        
+        .config-section input:focus,
+        .config-section select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        
+        .button-group {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+            flex-wrap: wrap;
+        }
+        
+        button {
+            flex: 1;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 5px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            min-width: 120px;
+        }
+        
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+        
+        .btn-success {
+            background: #28a745;
+            color: white;
+        }
+        
+        .btn-success:hover {
+            background: #218838;
+            transform: translateY(-2px);
+        }
+        
+        .btn-warning {
+            background: #ffc107;
+            color: #333;
+        }
+        
+        .btn-warning:hover {
+            background: #e0a800;
+            transform: translateY(-2px);
+        }
+        
+        .btn-danger {
+            background: #dc3545;
+            color: white;
+        }
+        
+        .btn-danger:hover {
+            background: #c82333;
+            transform: translateY(-2px);
+        }
+        
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none !important;
+        }
+        
+        #video {
+            width: 100%;
+            height: auto;
+            max-height: 400px;
+            background: #000;
+            border-radius: 8px;
+            display: block;
+        }
+        
+        #log {
+            background: #1e1e1e;
+            color: #00ff00;
+            padding: 15px;
+            height: 500px;
+            overflow-y: auto;
+            border-radius: 8px;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+            line-height: 1.6;
+            box-shadow: inset 0 2px 10px rgba(0,0,0,0.3);
+        }
+        
+        #log::-webkit-scrollbar {
+            width: 10px;
+        }
+        
+        #log::-webkit-scrollbar-track {
+            background: #2a2a2a;
+            border-radius: 5px;
+        }
+        
+        #log::-webkit-scrollbar-thumb {
+            background: #555;
+            border-radius: 5px;
+        }
+        
+        #log::-webkit-scrollbar-thumb:hover {
+            background: #777;
+        }
+        
+        .log-line {
+            margin-bottom: 3px;
+        }
+        
+        .log-info { color: #00ff00; }
+        .log-warn { color: #ffa500; }
+        .log-error { color: #ff4444; }
+        .log-success { color: #00ff88; }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+            margin-top: 15px;
+        }
+        
+        .stat-item {
+            background: white;
+            padding: 15px;
+            border-radius: 5px;
+            border-left: 4px solid #667eea;
+        }
+        
+        .stat-label {
+            color: #777;
+            font-size: 12px;
+            margin-bottom: 5px;
+        }
+        
+        .stat-value {
+            color: #333;
+            font-size: 20px;
+            font-weight: bold;
+        }
+        
+        .status-badge {
+            display: inline-block;
+            padding: 5px 15px;
+            border-radius: 15px;
+            font-size: 12px;
+            font-weight: 600;
+            margin-top: 10px;
+        }
+        
+        .status-disconnected {
+            background: #dc3545;
+            color: white;
+        }
+        
+        .status-connecting {
+            background: #ffc107;
+            color: #333;
+        }
+        
+        .status-connected {
+            background: #28a745;
+            color: white;
+        }
+        
+        .full-width {
+            grid-column: 1 / -1;
+        }
+        
+        @media (max-width: 1024px) {
+            .content {
+                grid-template-columns: 1fr;
+            }
+        }
+        
+        .info-box {
+            background: #e3f2fd;
+            border-left: 4px solid #2196f3;
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 5px;
+        }
+        
+        .info-box h3 {
+            color: #1976d2;
+            margin-bottom: 10px;
+            font-size: 16px;
+        }
+        
+        .info-box ul {
+            margin-left: 20px;
+            color: #555;
+        }
+        
+        .info-box li {
+            margin: 5px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎯 ZLMediaKit TURN 中继测试工具</h1>
+            <p>验证 TURN 服务器是否正常工作 | 强制使用中继模式</p>
+        </div>
+        
+        <div class="content">
+            <!-- 左侧：配置和控制面板 -->
+            <div class="panel">
+                <h2>⚙️ 配置参数</h2>
+                
+                <div class="config-section">
+                    <label>ZLM 服务器完整地址</label>
+                    <input type="text" id="serverUrl" value="http://172.16.100.159/index/api/webrtc" placeholder="http://172.16.100.159/index/api/webrtc">
+                    <small style="color: #777; font-size: 12px;">包含协议、域名、端口和路径</small>
+                </div>
+                
+                <div class="config-section">
+                    <label>应用名 (app)</label>
+                    <input type="text" id="app" value="264720" placeholder="例如: live">
+                </div>
+                
+                <div class="config-section">
+                    <label>流 ID (stream)</label>
+                    <input type="text" id="stream" value="dg-111" placeholder="例如: test">
+                </div>
+                
+                <div class="config-section">
+                    <label>TURN 服务器地址</label>
+                    <input type="text" id="turnServer" value="turn:172.16.100.159:3478?transport=udp" placeholder="turn:172.16.100.159:3478?transport=udp">
+                    <small style="color: #777; font-size: 12px;">通常和 ZLM 服务器域名相同</small>
+                </div>
+                
+                <div class="config-section">
+                    <label>外部 IP/域名（用于 SDP）</label>
+                    <input type="text" id="externIP" value="172.16.100.159" placeholder="例如: your-domain.com 或公网IP">
+                    <small style="color: #777; font-size: 12px;">替换 SDP 中的内网 IP，留空则自动从 TURN 地址提取</small>
+                </div>
+                
+                <div class="config-section">
+                    <label>TURN 用户名</label>
+                    <input type="text" id="turnUsername" value="NAwR6DMuD7UNuTMh" placeholder="ICE 用户名">
+                </div>
+                
+                <div class="config-section">
+                    <label>TURN 密码</label>
+                    <input type="text" id="turnPassword" value="NAwR6DMuD7UNuTMh" placeholder="ICE 密码">
+                </div>
+                
+                <div class="config-section">
+                    <label>ICE 传输策略</label>
+                    <select id="icePolicy">
+                        <option value="all">all - 尝试所有类型（P2P + TURN）</option>
+                        <option value="relay" selected>relay - 强制使用 TURN 中继 ⭐</option>
+                    </select>
+                </div>
+                
+                <div class="info-box">
+                    <h3>💡 使用说明（远程服务器）</h3>
+                    <ul>
+                        <li>填写完整的服务器地址（包含 https://）</li>
+                        <li>修改 TURN 地址为你的域名（不带 https://）</li>
+                        <li>选择 "relay" 强制使用 TURN 中继</li>
+                        <li>确认流 ID 存在（可先推流测试）</li>
+                        <li>点击"开始测试"后查看日志</li>
+                    </ul>
+                </div>
+                
+                <div class="button-group">
+                    <button class="btn-primary" onclick="startTest()">🚀 开始完整测试</button>
+                    <button class="btn-success" onclick="testTurnOnly()">🔧 仅测试 TURN 连接</button>
+                    <button class="btn-success" onclick="checkConnectionType()">🔍 检查连接类型</button>
+                    <button class="btn-warning" onclick="getDetailedStats()">📊 详细统计</button>
+                    <button class="btn-danger" onclick="stopTest()">⏹️ 停止</button>
+                </div>
+                
+                <div class="stats-grid">
+                    <div class="stat-item">
+                        <div class="stat-label">连接状态</div>
+                        <div class="stat-value" id="connectionState">未连接</div>
+                        <div class="status-badge status-disconnected" id="statusBadge">离线</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-label">ICE 状态</div>
+                        <div class="stat-value" id="iceState">new</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-label">候选类型</div>
+                        <div class="stat-value" id="candidateType">-</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-label">往返延迟 (RTT)</div>
+                        <div class="stat-value" id="rtt">- ms</div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 右侧：视频和日志 -->
+            <div class="panel">
+                <h2>📺 视频播放</h2>
+                <video id="video" autoplay playsinline controls muted></video>
+            </div>
+            
+            <div class="panel full-width">
+                <h2>📝 实时日志</h2>
+                <div id="log"></div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        let pc = null;
+        let startTime = null;
+        
+        // 日志函数
+        function log(msg, type = 'info') {
+            const logDiv = document.getElementById('log');
+            const time = new Date().toLocaleTimeString();
+            const className = `log-${type}`;
+            logDiv.innerHTML += `<div class="log-line ${className}">[${time}] ${msg}</div>`;
+            logDiv.scrollTop = logDiv.scrollHeight;
+            console.log(`[${type}] ${msg}`);
+        }
+        
+        function clearLog() {
+            document.getElementById('log').innerHTML = '';
+        }
+        
+        // 更新状态显示
+        function updateStatus(connectionState, iceState) {
+            document.getElementById('connectionState').textContent = connectionState;
+            document.getElementById('iceState').textContent = iceState;
+            
+            const badge = document.getElementById('statusBadge');
+            badge.className = 'status-badge';
+            
+            if (connectionState === 'connected') {
+                badge.textContent = '已连接';
+                badge.classList.add('status-connected');
+            } else if (connectionState === 'connecting') {
+                badge.textContent = '连接中';
+                badge.classList.add('status-connecting');
+            } else {
+                badge.textContent = '离线';
+                badge.classList.add('status-disconnected');
+            }
+        }
+        
+        // 仅测试 TURN 连接（不连接 ZLM）
+        async function testTurnOnly() {
+            clearLog();
+            log('========================================', 'info');
+            log('🔧 TURN 服务器连接测试', 'success');
+            log('========================================', 'info');
+            log('', 'info');
+            log('🎯 此测试仅验证浏览器能否从 TURN 服务器获取 relay 候选', 'info');
+            log('   不会连接到 ZLM 服务器，不会播放媒体流', 'info');
+            log('', 'info');
+            
+            try {
+                // 获取配置
+                const config = {
+                    turnServer: document.getElementById('turnServer').value,
+                    turnUsername: document.getElementById('turnUsername').value,
+                    turnPassword: document.getElementById('turnPassword').value,
+                    icePolicy: document.getElementById('icePolicy').value
+                };
+                
+                log('📋 配置参数:', 'info');
+                log(`   TURN 服务器: ${config.turnServer}`, 'info');
+                log(`   认证用户名: ${config.turnUsername}`, 'info');
+                log(`   ICE 策略: ${config.icePolicy}`, 'info');
+                log('', 'info');
+                
+                // 创建临时的 PeerConnection 仅用于测试 TURN
+                const pcConfig = {
+                    iceServers: [
+                        {
+                            urls: config.turnServer,
+                            username: config.turnUsername,
+                            credential: config.turnPassword
+                        }
+                    ],
+                    iceTransportPolicy: config.icePolicy
+                };
+                
+                const testPc = new RTCPeerConnection(pcConfig);
+                log('✅ PeerConnection 已创建', 'success');
+                log('', 'info');
+                
+                // 候选统计
+                let candidateStats = {
+                    host: 0,
+                    srflx: 0,
+                    relay: 0,
+                    total: 0
+                };
+                
+                // 监听 ICE 候选
+                testPc.onicecandidate = (event) => {
+                    if (event.candidate) {
+                        const c = event.candidate;
+                        candidateStats.total++;
+                        candidateStats[c.type] = (candidateStats[c.type] || 0) + 1;
+                        
+                        log(`🎯 ICE 候选 #${candidateStats.total}: ${c.type} | ${c.protocol} | ${c.address}:${c.port}`, 
+                            c.type === 'relay' ? 'success' : 'warn');
+                        log(`   ${c.candidate}`, 'info');
+                    } else {
+                        log('', 'info');
+                        log('✅ ICE 候选收集完成', 'success');
+                        log(`📊 统计结果: host=${candidateStats.host}, srflx=${candidateStats.srflx}, relay=${candidateStats.relay}`, 'info');
+                        log('', 'info');
+                        
+                        // 诊断结果
+                        if (candidateStats.relay > 0) {
+                            log('========================================', 'success');
+                            log('✅✅✅ TURN 服务器连接成功！', 'success');
+                            log('========================================', 'success');
+                            log(`   成功获取 ${candidateStats.relay} 个 relay 候选`, 'success');
+                            log('   TURN 服务器工作正常', 'success');
+                            log('', 'success');
+                            log('💡 下一步：点击"开始完整测试"验证媒体流播放', 'info');
+                        } else {
+                            log('========================================', 'error');
+                            log('❌❌❌ TURN 服务器连接失败！', 'error');
+                            log('========================================', 'error');
+                            log('', 'error');
+                            log('🔍 未获取到任何 relay 候选，可能原因：', 'error');
+                            log('', 'error');
+                            log('1️⃣  TURN 服务器连接失败', 'error');
+                            log(`   • 域名无法解析: ${config.turnServer.split(':')[1].replace('//', '')}`, 'error');
+                            log('   • 端口不通: 3478/udp', 'error');
+                            log('   • 防火墙阻止', 'error');
+                            log('', 'error');
+                            log('2️⃣  TURN 认证失败', 'error');
+                            log(`   • 当前用户名: ${config.turnUsername}`, 'error');
+                            log('   • 检查 ZLM config.ini 中的 iceUfrag/icePwd', 'error');
+                            log('', 'error');
+                            log('3️⃣  ZLM 配置问题', 'error');
+                            log('   • config.ini 中 externIP 未配置', 'error');
+                            log('   • config.ini 中 enableTurn=0', 'error');
+                            log('', 'error');
+                            log('💡 建议操作：', 'warn');
+                            log('   1. 打开浏览器控制台（F12）查看错误信息', 'warn');
+                            log('   2. 访问 chrome://webrtc-internals 查看详细日志', 'warn');
+                            log('   3. 参考 "诊断脚本-ZLM配置检查.md" 文件', 'warn');
+                            log('   4. 检查 ZLM 服务器日志: tail -f /opt/ZLMediaKit/log/*.log', 'warn');
+                        }
+                        
+                        // 清理
+                        setTimeout(() => {
+                            testPc.close();
+                            log('', 'info');
+                            log('🧹 测试连接已关闭', 'info');
+                        }, 2000);
+                    }
+                };
+                
+                // 监听 ICE 状态
+                testPc.onicegatheringstatechange = () => {
+                    log(`📊 ICE 收集状态: ${testPc.iceGatheringState}`, 'info');
+                };
+                
+                // 添加虚拟接收器以触发 ICE 收集
+                testPc.addTransceiver('audio', { direction: 'recvonly' });
+                
+                // 创建 Offer 触发 ICE 收集
+                log('🔍 开始收集 ICE 候选...', 'info');
+                log('', 'info');
+                const offer = await testPc.createOffer();
+                await testPc.setLocalDescription(offer);
+                
+            } catch (error) {
+                log('', 'error');
+                log('❌ 测试失败: ' + error.message, 'error');
+                console.error('TURN test error:', error);
+            }
+        }
+        
+        // 开始测试
+        async function startTest() {
+            clearLog();
+            log('========================================', 'info');
+            log('🚀 开始 TURN 中继测试', 'success');
+            log('========================================', 'info');
+            
+            startTime = Date.now();
+            
+            // 获取配置
+            const config = {
+                serverUrl: document.getElementById('serverUrl').value,
+                app: document.getElementById('app').value,
+                stream: document.getElementById('stream').value,
+                turnServer: document.getElementById('turnServer').value,
+                turnUsername: document.getElementById('turnUsername').value,
+                turnPassword: document.getElementById('turnPassword').value,
+                icePolicy: document.getElementById('icePolicy').value,
+                externIP: document.getElementById('externIP').value.trim()
+            };
+            
+            log('📋 配置参数:', 'info');
+            log(`   服务器: ${config.serverUrl}`, 'info');
+            log(`   应用: ${config.app}`, 'info');
+            log(`   流ID: ${config.stream}`, 'info');
+            log(`   TURN: ${config.turnServer}`, 'info');
+            log(`   策略: ${config.icePolicy}`, 'warn');
+            
+            // 停止旧连接
+            if (pc) {
+                pc.close();
+                pc = null;
+            }
+            
+            try {
+                // 创建 RTCPeerConnection
+                log('', 'info');
+                log('📡 创建 RTCPeerConnection...', 'info');
+                
+                // 配置 TURN 服务器
+                const pcConfig = {
+                    iceServers: [
+                        {
+                            urls: config.turnServer,
+                            username: config.turnUsername,
+                            credential: config.turnPassword
+                        }
+                    ],
+                    iceTransportPolicy: config.icePolicy
+                };
+                
+                pc = new RTCPeerConnection(pcConfig);
+                log('✅ PeerConnection 已创建', 'success');
+                
+                if (config.icePolicy === 'relay') {
+                    log('🔒 已启用强制 TURN 中继模式', 'warn');
+                    log('   只会使用 relay 类型的候选', 'warn');
+                }
+                
+                // 添加接收器（用于接收媒体流）
+                pc.addTransceiver('video', { direction: 'recvonly' });
+                pc.addTransceiver('audio', { direction: 'recvonly' });
+                
+                // ICE 候选统计
+                let candidateStats = {
+                    host: 0,
+                    srflx: 0,
+                    relay: 0,
+                    total: 0
+                };
+                
+                // ICE 候选事件
+                pc.onicecandidate = (event) => {
+                    if (event.candidate) {
+                        const c = event.candidate;
+                        candidateStats.total++;
+                        candidateStats[c.type] = (candidateStats[c.type] || 0) + 1;
+                        
+                        log(`🎯 ICE 候选 #${candidateStats.total}: ${c.type} | ${c.protocol} | ${c.address}:${c.port}`, 
+                            c.type === 'relay' ? 'success' : 'warn');
+                        
+                        if (c.type !== 'relay' && config.icePolicy === 'relay') {
+                            log('⚠️  警告: 出现了非 relay 候选，检查配置！', 'error');
+                        }
+                        
+                        // 详细候选信息
+                        log(`   candidate: ${c.candidate}`, 'info');
+                    } else {
+                        log('✅ ICE 候选收集完成', 'success');
+                        log(`   📊 统计: host=${candidateStats.host}, srflx=${candidateStats.srflx}, relay=${candidateStats.relay}`, 'info');
+                        
+                        // 诊断：如果强制 relay 但没有 relay 候选
+                        if (config.icePolicy === 'relay' && candidateStats.relay === 0) {
+                            log('', 'error');
+                            log('❌❌❌ 严重问题：强制 TURN 中继，但没有收集到任何 relay 候选！', 'error');
+                            log('', 'error');
+                            log('🔍 可能的原因：', 'error');
+                            log('   1️⃣  TURN 服务器连接失败（检查域名解析和端口连通性）', 'error');
+                            log(`   2️⃣  TURN 认证失败（当前：${config.turnUsername}）`, 'error');
+                            log('   3️⃣  ZLM config.ini 中 externIP 未配置或配置错误', 'error');
+                            log('   4️⃣  ZLM config.ini 中 enableTurn=0 或未启用', 'error');
+                            log('   5️⃣  防火墙阻止了 3478/udp 端口', 'error');
+                            log('', 'error');
+                            log('💡 建议操作：', 'warn');
+                            log('   • 在浏览器控制台查看是否有 TURN 相关错误', 'warn');
+                            log('   • 打开浏览器 chrome://webrtc-internals 查看详细日志', 'warn');
+                            log('   • 参考 "诊断脚本-ZLM配置检查.md" 文件', 'warn');
+                            log('', 'warn');
+                        } else if (config.icePolicy === 'relay' && candidateStats.relay > 0) {
+                            log(`✅ 成功获取 ${candidateStats.relay} 个 relay 候选`, 'success');
+                        }
+                    }
+                };
+                
+                // ICE 收集状态
+                pc.onicegatheringstatechange = () => {
+                    log(`📊 ICE 收集状态: ${pc.iceGatheringState}`, 'info');
+                };
+                
+                // ICE 连接状态
+                pc.oniceconnectionstatechange = () => {
+                    const state = pc.iceConnectionState;
+                    log(`🔗 ICE 连接状态: ${state}`, state === 'connected' ? 'success' : 'info');
+                    updateStatus(pc.connectionState, state);
+                    
+                    if (state === 'connected') {
+                        const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
+                        log(`🎉 连接建立成功！耗时: ${elapsed} 秒`, 'success');
+                        
+                        // 自动检查连接类型
+                        setTimeout(() => checkConnectionType(), 1000);
+                    } else if (state === 'failed') {
+                        log('❌ ICE 连接失败！', 'error');
+                    }
+                };
+                
+                // 连接状态
+                pc.onconnectionstatechange = () => {
+                    log(`📡 连接状态: ${pc.connectionState}`, 'info');
+                    updateStatus(pc.connectionState, pc.iceConnectionState);
+                };
+                
+                // 接收媒体流
+                pc.ontrack = (event) => {
+                    log('📺 收到媒体轨道: ' + event.track.kind, 'success');
+                    const video = document.getElementById('video');
+                    if (!video.srcObject) {
+                        video.srcObject = event.streams[0];
+                        log('✅ 视频流已设置', 'success');
+                    }
+                };
+                
+                // 创建 Offer
+                log('', 'info');
+                log('📝 创建 SDP Offer...', 'info');
+                const offer = await pc.createOffer();
+                await pc.setLocalDescription(offer);
+                log('✅ 本地 SDP 已设置', 'success');
+                
+                // 🔧 临时：不修改 SDP，直接使用原始的
+                let sdp = offer.sdp;
+                
+                log(`📍 使用原始 SDP（未修改）`, 'info');
+                
+                // 显示原始 origin
+                const originRegex = /^o=(.+)$/m;
+                const originMatch = sdp.match(originRegex);
+                if (originMatch) {
+                    log(`   原始 origin: o=${originMatch[1]}`, 'info');
+                }
+                
+                // 发送到 ZLM
+                log('', 'info');
+                log('📤 发送 Offer 到 ZLM...', 'info');
+                
+                const url = `${config.serverUrl}?app=${config.app}&stream=${config.stream}&type=play`;
+                log(`   URL: ${url}`, 'info');
+                
+                // 显示完整的 SDP（用于调试）
+                log('', 'info');
+                log('📋 完整的 SDP Offer:', 'info');
+                sdp.split('\n').forEach((line, idx) => {
+                    if (line.trim()) {
+                        log(`   ${idx + 1}: ${line}`, 'info');
+                    }
+                });
+                log('', 'info');
+                
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'text/plain;charset=utf-8'  // ← 修复：改为text/plain
+                    },
+                    body: sdp  // ← 修复：直接发送SDP文本，不是JSON
+                });
+                
+                const result = await response.json();
+                log(`📥 收到响应: code=${result.code}`, result.code === 0 ? 'success' : 'error');
+                
+                if (result.code === 0) {
+                    // 设置远端 SDP
+                    await pc.setRemoteDescription({
+                        type: 'answer',
+                        sdp: result.sdp
+                    });
+                    log('✅ 远端 SDP 已设置', 'success');
+                    log('', 'info');
+                    log('⏳ 等待 ICE 连接建立...', 'info');
+                } else {
+                    log(`❌ ZLM 返回错误: ${JSON.stringify(result)}`, 'error');
+                }
+                
+            } catch (error) {
+                log(`❌ 错误: ${error.message}`, 'error');
+                console.error(error);
+            }
+        }
+        
+        // 检查连接类型
+        async function checkConnectionType() {
+            if (!pc) {
+                log('❌ 请先开始测试', 'error');
+                return;
+            }
+            
+            log('', 'info');
+            log('========================================', 'info');
+            log('🔍 检查连接类型...', 'info');
+            log('========================================', 'info');
+            
+            const stats = await pc.getStats();
+            let foundRelay = false;
+            let candidateInfo = {};
+            
+            stats.forEach(report => {
+                if (report.type === 'candidate-pair' && report.state === 'succeeded') {
+                    log(`✅ 成功的候选对: ${report.id}`, 'success');
+                    log(`   状态: ${report.state}`, 'info');
+                    log(`   优先级: ${report.priority}`, 'info');
+                    
+                    // 查找候选详情
+                    stats.forEach(r => {
+                        if (r.id === report.localCandidateId) {
+                            candidateInfo.local = r;
+                            const type = r.candidateType || r.type;
+                            log(`   本地候选: ${type}`, type === 'relay' ? 'success' : 'warn');
+                            log(`     地址: ${r.address || r.ip}:${r.port}`, 'info');
+                            log(`     协议: ${r.protocol}`, 'info');
+                            if (r.relayProtocol) {
+                                log(`     中继协议: ${r.relayProtocol}`, 'info');
+                            }
+                            if (type === 'relay') foundRelay = true;
+                        }
+                        if (r.id === report.remoteCandidateId) {
+                            candidateInfo.remote = r;
+                            const type = r.candidateType || r.type;
+                            log(`   远端候选: ${type}`, 'info');
+                            log(`     地址: ${r.address || r.ip}:${r.port}`, 'info');
+                            log(`     协议: ${r.protocol}`, 'info');
+                        }
+                    });
+                }
+            });
+            
+            log('', 'info');
+            if (foundRelay) {
+                log('🎉🎉🎉 确认：正在使用 TURN 中继！', 'success');
+                log('✅ 媒体数据通过服务器转发', 'success');
+                document.getElementById('candidateType').textContent = 'TURN Relay';
+                document.getElementById('candidateType').style.color = '#28a745';
+            } else {
+                log('⚠️⚠️⚠️ 警告：没有使用 TURN 中继！', 'error');
+                log('❌ 当前使用 P2P 直连', 'error');
+                const localType = candidateInfo.local?.candidateType || candidateInfo.local?.type || '未知';
+                document.getElementById('candidateType').textContent = localType;
+                document.getElementById('candidateType').style.color = '#dc3545';
+            }
+        }
+        
+        // 获取详细统计
+        async function getDetailedStats() {
+            if (!pc) {
+                log('❌ 请先开始测试', 'error');
+                return;
+            }
+            
+            log('', 'info');
+            log('========================================', 'info');
+            log('📊 详细统计信息', 'info');
+            log('========================================', 'info');
+            
+            const stats = await pc.getStats();
+            
+            stats.forEach(report => {
+                if (report.type === 'candidate-pair' && report.state === 'succeeded') {
+                    log('📈 活跃连接统计:', 'success');
+                    log(`   往返延迟 (RTT): ${report.currentRoundTripTime ? (report.currentRoundTripTime * 1000).toFixed(2) + ' ms' : '未知'}`, 'info');
+                    log(`   可用带宽: ${report.availableOutgoingBitrate ? (report.availableOutgoingBitrate / 1000000).toFixed(2) + ' Mbps' : '未知'}`, 'info');
+                    log(`   发送字节: ${report.bytesSent || 0}`, 'info');
+                    log(`   接收字节: ${report.bytesReceived || 0}`, 'info');
+                    log(`   发送数据包: ${report.packetsSent || 0}`, 'info');
+                    log(`   接收数据包: ${report.packetsReceived || 0}`, 'info');
+                    
+                    // 更新 RTT 显示
+                    if (report.currentRoundTripTime) {
+                        const rtt = (report.currentRoundTripTime * 1000).toFixed(0);
+                        document.getElementById('rtt').textContent = rtt + ' ms';
+                    }
+                }
+                
+                if (report.type === 'inbound-rtp' && report.kind === 'video') {
+                    log('📹 视频接收统计:', 'info');
+                    log(`   接收字节: ${report.bytesReceived || 0}`, 'info');
+                    log(`   接收数据包: ${report.packetsReceived || 0}`, 'info');
+                    log(`   丢包: ${report.packetsLost || 0}`, 'info');
+                    log(`   抖动: ${report.jitter ? (report.jitter * 1000).toFixed(2) + ' ms' : '未知'}`, 'info');
+                }
+                
+                if (report.type === 'inbound-rtp' && report.kind === 'audio') {
+                    log('🔊 音频接收统计:', 'info');
+                    log(`   接收字节: ${report.bytesReceived || 0}`, 'info');
+                    log(`   接收数据包: ${report.packetsReceived || 0}`, 'info');
+                    log(`   丢包: ${report.packetsLost || 0}`, 'info');
+                }
+            });
+        }
+        
+        // 停止测试
+        function stopTest() {
+            if (pc) {
+                pc.close();
+                pc = null;
+                log('⏹️  测试已停止', 'warn');
+                updateStatus('disconnected', 'closed');
+                document.getElementById('candidateType').textContent = '-';
+                document.getElementById('rtt').textContent = '- ms';
+                
+                const video = document.getElementById('video');
+                video.srcObject = null;
+            } else {
+                log('⚠️  没有活跃的连接', 'warn');
+            }
+        }
+        
+        // 页面加载完成
+        window.onload = () => {
+            log('✅ TURN 测试工具已就绪', 'success');
+            log('💡 请配置远程服务器参数后点击"开始测试"', 'info');
+            log('', 'info');
+            log('📝 配置示例:', 'warn');
+            log('   ZLM 服务器: https://streams.vhalo.net:1443/index/api/webrtc', 'info');
+            log('   TURN 服务器: turn:streams.vhalo.net:3478?transport=udp', 'info');
+            log('   应用名: live', 'info');
+            log('   流ID: test', 'info');
+            log('', 'info');
+            
+            // 尝试从当前 URL 获取域名（如果页面部署在服务器上）
+            const hostname = window.location.hostname;
+            if (hostname && hostname !== 'localhost' && hostname !== '') {
+                const protocol = window.location.protocol;
+                const port = window.location.port || (protocol === 'https:' ? '443' : '80');
+                
+                // 设置默认值
+                const serverUrl = `${protocol}//${hostname}${port !== '80' && port !== '443' ? ':' + port : ''}/index/api/webrtc`;
+                const turnUrl = `turn:${hostname}:3478?transport=udp`;
+                
+                document.getElementById('serverUrl').value = serverUrl;
+                document.getElementById('turnServer').value = turnUrl;
+                
+                log(`💡 自动检测到服务器配置:`, 'success');
+                log(`   域名: ${hostname}`, 'info');
+                log(`   ZLM 地址: ${serverUrl}`, 'info');
+                log(`   TURN 地址: ${turnUrl}`, 'info');
+                log('', 'info');
+            } else {
+                log('⚠️  页面在本地打开，请手动配置服务器地址', 'warn');
+                log('', 'info');
+            }
+        };
+        
+        // 定期更新统计（每 5 秒）
+        setInterval(async () => {
+            if (pc && pc.iceConnectionState === 'connected') {
+                const stats = await pc.getStats();
+                stats.forEach(report => {
+                    if (report.type === 'candidate-pair' && report.state === 'succeeded') {
+                        if (report.currentRoundTripTime) {
+                            const rtt = (report.currentRoundTripTime * 1000).toFixed(0);
+                            document.getElementById('rtt').textContent = rtt + ' ms';
+                        }
+                    }
+                });
+            }
+        }, 5000);
+    </script>
+</body>
+</html>
+

@@ -13,6 +13,7 @@
 
 #include "Common/config.h"
 #include "Util/List.h"
+#include <mutex>
 
 namespace mediakit {
 // / 缓存刷新策略类  [AUTO-TRANSLATED:bd941d15]
@@ -43,9 +44,10 @@ public:
     virtual ~PacketCache() = default;
 
     void inputPacket(uint64_t stamp, bool is_video, std::shared_ptr<packet> pkt, bool key_pos) {
+        std::lock_guard<std::mutex> lock(_mtx);
         bool flag = flushImmediatelyWhenCloseMerge();
         if (!flag && _policy.isFlushAble(is_video, key_pos, stamp, _cache->size())) {
-            flush();
+            flush_l();
         }
 
         // 追加数据到最后  [AUTO-TRANSLATED:e24ccfb6]
@@ -56,11 +58,24 @@ public:
         }
 
         if (flag) {
-            flush();
+            flush_l();
         }
     }
 
     void flush() {
+        std::lock_guard<std::mutex> lock(_mtx);
+        flush_l();
+    }
+
+    virtual void clearCache() {
+        std::lock_guard<std::mutex> lock(_mtx);
+        _cache->clear();
+    }
+
+    virtual void onFlush(std::shared_ptr<packet_list>, bool key_pos) = 0;
+
+private:
+    void flush_l() {
         if (_cache->empty()) {
             return;
         }
@@ -69,13 +84,6 @@ public:
         _key_pos = false;
     }
 
-    virtual void clearCache() {
-        _cache->clear();
-    }
-
-    virtual void onFlush(std::shared_ptr<packet_list>, bool key_pos) = 0;
-
-private:
     bool flushImmediatelyWhenCloseMerge() {
         // 一般的协议关闭合并写时，立即刷新缓存，这样可以减少一帧的延时，但是rtp例外  [AUTO-TRANSLATED:54eba701]
         // Generally, when the protocol closes the merge write, the cache is refreshed immediately, which can reduce the delay of one frame, but RTP is an exception.
@@ -95,6 +103,7 @@ private:
     bool _key_pos = false;
     policy _policy;
     std::shared_ptr<packet_list> _cache;
+    std::mutex _mtx;
 };
 }
 
