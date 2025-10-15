@@ -2067,6 +2067,50 @@ void installWebApi() {
                 val["sdp"] = handler.getAnswerSdp(offer);
                 val["id"] = exchanger.getIdentifier();
                 val["type"] = "answer";
+                
+                // 添加 ICE 服务器配置
+                GET_CONFIG(string, externalTurnUrl, Rtc::kExternalTurnUrl);
+                GET_CONFIG(string, externalTurnUsername, Rtc::kExternalTurnUsername);
+                GET_CONFIG(string, externalTurnPassword, Rtc::kExternalTurnPassword);
+                
+                bool useExternalTurn = !externalTurnUrl.empty();
+                
+                if (useExternalTurn) {
+                    // 使用外部 TURN 服务器
+                    InfoL << "使用外部 TURN 服务器: " << externalTurnUrl;
+                    Value ice_server;
+                    ice_server["url"] = externalTurnUrl;
+                    ice_server["username"] = externalTurnUsername;
+                    ice_server["credential"] = externalTurnPassword;
+                    val["ice_servers"].append(ice_server);
+                } else {
+                    // 使用内置 TURN 服务器
+                    GET_CONFIG(uint16_t, icePort, Rtc::kIcePort);
+                    GET_CONFIG(bool, enable_turn, Rtc::kEnableTurn);
+                    GET_CONFIG(string, iceUfrag, Rtc::kIceUfrag);
+                    GET_CONFIG(string, icePwd, Rtc::kIcePwd);
+                    GET_CONFIG_FUNC(std::vector<std::string>, extern_ips, Rtc::kExternIP, [](string str) {
+                        std::vector<std::string> ret;
+                        if (str.length()) {
+                            ret = split(str, ",");
+                        }
+                        translateIPFromEnv(ret);
+                        return ret;
+                    });
+                    
+                    if (enable_turn && !extern_ips.empty()) {
+                        InfoL << "使用内置 TURN 服务器";
+                        std::string extern_ip = extern_ips.front();
+                        std::string url = "turn:" + extern_ip + ":" + std::to_string(icePort) + "?transport=udp";
+                        
+                        Value ice_server;
+                        ice_server["url"] = url;
+                        ice_server["username"] = iceUfrag;
+                        ice_server["credential"] = icePwd;
+                        val["ice_servers"].append(ice_server);
+                    }
+                }
+                
                 invoker(200, headerOut, val.toStyledString());
             } catch (std::exception &ex) {
                 val["code"] = API::Exception;

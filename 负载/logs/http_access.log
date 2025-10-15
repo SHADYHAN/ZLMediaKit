@@ -1,0 +1,8 @@
+58.33.120.163 - - [11/Oct/2025:08:06:27 +0000] "POST /index/api/webrtc?app=264720&stream=dg-111&type=play HTTP/1.1" 200 3228 "http://192.168.102.202:8081/" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36 Edg/141.0.0.0" "-" backend=10.1.100.247:1440
+185.170.144.3 - - [11/Oct/2025:08:14:44 +0000] "\x03\x00\x00/*\xE0\x00\x00\x00\x00\x00Cookie: mstshash=Administr" 400 163 "-" "-" "-" backend=-
+87.120.191.37 - - [11/Oct/2025:08:39:14 +0000] "\x05\x01\x00" 400 163 "-" "-" "-" backend=-
+60.191.125.35 - - [11/Oct/2025:08:39:34 +0000] "HEAD http://112.124.42.80:63435/ HTTP/1.1" 200 0 "-" "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_11_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/53.0.2785.143 Safari/537.36" "-" backend=10.1.100.247:1440
+65.49.1.24 - - [11/Oct/2025:09:39:55 +0000] "\x16\x03\x01\x00{\x01\x00\x00w\x03\x03\xA4\x87<\x12\xBD\xE9\x8F" 400 163 "-" "-" "-" backend=-
+87.120.191.37 - - [11/Oct/2025:09:43:06 +0000] "GET http://ip-api.com/json/ HTTP/1.1" 404 271 "-" "Go-http-client/1.1" "-" backend=10.1.100.247:1440
+87.120.191.37 - - [11/Oct/2025:09:43:07 +0000] "\x04\x01\x00P\xD0_p\x01\x00" 400 163 "-" "-" "-" backend=-
+87.120.191.37 - - [11/Oct/2025:09:43:08 +0000] "\x05\x01\x00" 400 163 "-" "-" "-" backend=-

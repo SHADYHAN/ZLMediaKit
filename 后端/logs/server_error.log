@@ -1,0 +1,190 @@
+
+2025/10/11 03:30:22 [notice] 1439#1439: signal 3 (SIGQUIT) received from 1632, shutting down
+2025/10/11 03:30:22 [notice] 1449#1449: gracefully shutting down
+2025/10/11 03:30:22 [notice] 1442#1442: gracefully shutting down
+2025/10/11 03:30:22 [notice] 1445#1445: gracefully shutting down
+2025/10/11 03:30:22 [notice] 1440#1440: gracefully shutting down
+2025/10/11 03:30:22 [notice] 1441#1441: gracefully shutting down
+2025/10/11 03:30:22 [notice] 1448#1448: gracefully shutting down
+2025/10/11 03:30:22 [notice] 1443#1443: gracefully shutting down
+2025/10/11 03:30:22 [notice] 1446#1446: gracefully shutting down
+2025/10/11 03:30:22 [notice] 1449#1449: exiting
+2025/10/11 03:30:22 [notice] 1445#1445: exiting
+2025/10/11 03:30:22 [notice] 1449#1449: exit
+2025/10/11 03:30:22 [notice] 1442#1442: exiting
+2025/10/11 03:30:22 [notice] 1443#1443: exiting
+2025/10/11 03:30:22 [notice] 1445#1445: exit
+2025/10/11 03:30:22 [notice] 1442#1442: exit
+2025/10/11 03:30:22 [notice] 1446#1446: exiting
+2025/10/11 03:30:22 [notice] 1448#1448: exiting
+2025/10/11 03:30:22 [notice] 1440#1440: exiting
+2025/10/11 03:30:22 [notice] 1446#1446: exit
+2025/10/11 03:30:22 [notice] 1441#1441: exiting
+2025/10/11 03:30:22 [notice] 1448#1448: exit
+2025/10/11 03:30:22 [notice] 1440#1440: exit
+2025/10/11 03:30:22 [notice] 1439#1439: signal 17 (SIGCHLD) received from 1449
+2025/10/11 03:30:22 [notice] 1439#1439: worker process 1445 exited with code 0
+2025/10/11 03:30:22 [notice] 1439#1439: worker process 1446 exited with code 0
+2025/10/11 03:30:22 [notice] 1439#1439: worker process 1449 exited with code 0
+2025/10/11 03:30:22 [notice] 1439#1439: signal 29 (SIGIO) received
+2025/10/11 03:30:22 [notice] 1439#1439: signal 17 (SIGCHLD) received from 1446
+2025/10/11 03:30:22 [notice] 1441#1441: exit
+2025/10/11 03:30:22 [notice] 1439#1439: signal 17 (SIGCHLD) received from 1442
+2025/10/11 03:30:22 [notice] 1439#1439: worker process 1442 exited with code 0
+2025/10/11 03:30:22 [notice] 1439#1439: signal 29 (SIGIO) received
+2025/10/11 03:30:22 [notice] 1443#1443: exit
+2025/10/11 03:30:22 [notice] 1439#1439: signal 17 (SIGCHLD) received from 1440
+2025/10/11 03:30:22 [notice] 1439#1439: worker process 1440 exited with code 0
+2025/10/11 03:30:22 [notice] 1439#1439: signal 29 (SIGIO) received
+2025/10/11 03:30:22 [notice] 1439#1439: signal 17 (SIGCHLD) received from 1448
+2025/10/11 03:30:22 [notice] 1439#1439: worker process 1448 exited with code 0
+2025/10/11 03:30:22 [notice] 1439#1439: signal 29 (SIGIO) received
+2025/10/11 03:30:22 [notice] 1439#1439: signal 17 (SIGCHLD) received from 1441
+2025/10/11 03:30:22 [notice] 1439#1439: worker process 1441 exited with code 0
+2025/10/11 03:30:22 [notice] 1439#1439: signal 29 (SIGIO) received
+2025/10/11 03:30:22 [notice] 1439#1439: signal 17 (SIGCHLD) received from 1443
+2025/10/11 03:30:22 [notice] 1439#1439: worker process 1443 exited with code 0
+2025/10/11 03:30:22 [notice] 1439#1439: exit
+2025/10/11 05:23:38 [notice] 1560#1560: using the "epoll" event method
+2025/10/11 05:23:38 [notice] 1560#1560: openresty/1.27.1.2
+2025/10/11 05:23:38 [notice] 1560#1560: OS: Linux 6.8.0-85-generic
+2025/10/11 05:23:38 [notice] 1560#1560: getrlimit(RLIMIT_NOFILE): 65536:65536
+2025/10/11 05:23:38 [notice] 1563#1563: start worker processes
+2025/10/11 05:23:38 [notice] 1563#1563: start worker process 1564
+2025/10/11 05:23:38 [notice] 1563#1563: start worker process 1565
+2025/10/11 05:23:38 [notice] 1563#1563: start worker process 1566
+2025/10/11 05:23:38 [notice] 1563#1563: start worker process 1567
+2025/10/11 05:26:17 [notice] 1563#1563: signal 3 (SIGQUIT) received from 1769, shutting down
+2025/10/11 05:26:17 [notice] 1565#1565: gracefully shutting down
+2025/10/11 05:26:17 [notice] 1564#1564: gracefully shutting down
+2025/10/11 05:26:17 [notice] 1564#1564: exiting
+2025/10/11 05:26:17 [notice] 1566#1566: gracefully shutting down
+2025/10/11 05:26:17 [notice] 1566#1566: exiting
+2025/10/11 05:26:17 [notice] 1567#1567: gracefully shutting down
+2025/10/11 05:26:17 [notice] 1564#1564: exit
+2025/10/11 05:26:17 [notice] 1567#1567: exiting
+2025/10/11 05:26:17 [notice] 1567#1567: exit
+2025/10/11 05:26:17 [notice] 1566#1566: exit
+2025/10/11 05:26:17 [notice] 1565#1565: exiting
+2025/10/11 05:26:17 [notice] 1563#1563: signal 17 (SIGCHLD) received from 1564
+2025/10/11 05:26:17 [notice] 1563#1563: worker process 1564 exited with code 0
+2025/10/11 05:26:17 [notice] 1563#1563: signal 29 (SIGIO) received
+2025/10/11 05:26:17 [notice] 1563#1563: signal 17 (SIGCHLD) received from 1567
+2025/10/11 05:26:17 [notice] 1563#1563: worker process 1567 exited with code 0
+2025/10/11 05:26:17 [notice] 1563#1563: signal 29 (SIGIO) received
+2025/10/11 05:26:17 [notice] 1565#1565: exit
+2025/10/11 05:26:17 [notice] 1563#1563: signal 17 (SIGCHLD) received from 1566
+2025/10/11 05:26:17 [notice] 1563#1563: worker process 1566 exited with code 0
+2025/10/11 05:26:17 [notice] 1563#1563: signal 29 (SIGIO) received
+2025/10/11 05:26:17 [notice] 1563#1563: signal 17 (SIGCHLD) received from 1565
+2025/10/11 05:26:17 [notice] 1563#1563: worker process 1565 exited with code 0
+2025/10/11 05:26:17 [notice] 1563#1563: exit
+2025/10/11 05:26:34 [notice] 1264#1264: using the "epoll" event method
+2025/10/11 05:26:34 [notice] 1264#1264: openresty/1.27.1.2
+2025/10/11 05:26:34 [notice] 1264#1264: OS: Linux 6.8.0-85-generic
+2025/10/11 05:26:34 [notice] 1264#1264: getrlimit(RLIMIT_NOFILE): 65536:65536
+2025/10/11 05:26:34 [notice] 1286#1286: start worker processes
+2025/10/11 05:26:34 [notice] 1286#1286: start worker process 1287
+2025/10/11 05:26:34 [notice] 1286#1286: start worker process 1288
+2025/10/11 05:26:34 [notice] 1286#1286: start worker process 1289
+2025/10/11 05:26:34 [notice] 1286#1286: start worker process 1290
+2025/10/11 06:08:36 [notice] 1286#1286: signal 3 (SIGQUIT) received from 4697, shutting down
+2025/10/11 06:08:36 [notice] 1287#1287: gracefully shutting down
+2025/10/11 06:08:36 [notice] 1288#1288: gracefully shutting down
+2025/10/11 06:08:36 [notice] 1289#1289: gracefully shutting down
+2025/10/11 06:08:36 [notice] 1290#1290: gracefully shutting down
+2025/10/11 06:08:36 [notice] 1289#1289: exiting
+2025/10/11 06:08:36 [notice] 1290#1290: exiting
+2025/10/11 06:08:36 [notice] 1287#1287: exiting
+2025/10/11 06:08:36 [notice] 1288#1288: exiting
+2025/10/11 06:08:36 [notice] 1287#1287: exit
+2025/10/11 06:08:36 [notice] 1288#1288: exit
+2025/10/11 06:08:36 [notice] 1290#1290: exit
+2025/10/11 06:08:36 [notice] 1289#1289: exit
+2025/10/11 06:08:36 [notice] 1286#1286: signal 17 (SIGCHLD) received from 1287
+2025/10/11 06:08:36 [notice] 1286#1286: worker process 1287 exited with code 0
+2025/10/11 06:08:36 [notice] 1286#1286: worker process 1288 exited with code 0
+2025/10/11 06:08:36 [notice] 1286#1286: signal 29 (SIGIO) received
+2025/10/11 06:08:36 [notice] 1286#1286: signal 17 (SIGCHLD) received from 1289
+2025/10/11 06:08:36 [notice] 1286#1286: worker process 1289 exited with code 0
+2025/10/11 06:08:36 [notice] 1286#1286: signal 29 (SIGIO) received
+2025/10/11 06:08:36 [notice] 1286#1286: signal 17 (SIGCHLD) received from 1290
+2025/10/11 06:08:36 [notice] 1286#1286: worker process 1290 exited with code 0
+2025/10/11 06:08:36 [notice] 1286#1286: exit
+2025/10/11 06:12:57 [notice] 1454#1454: using the "epoll" event method
+2025/10/11 06:12:57 [notice] 1454#1454: openresty/1.27.1.2
+2025/10/11 06:12:57 [notice] 1454#1454: OS: Linux 6.8.0-85-generic
+2025/10/11 06:12:57 [notice] 1454#1454: getrlimit(RLIMIT_NOFILE): 65536:65536
+2025/10/11 06:12:57 [notice] 1473#1473: start worker processes
+2025/10/11 06:12:57 [notice] 1473#1473: start worker process 1474
+2025/10/11 06:12:57 [notice] 1473#1473: start worker process 1475
+2025/10/11 06:12:57 [notice] 1473#1473: start worker process 1476
+2025/10/11 06:12:57 [notice] 1473#1473: start worker process 1477
+2025/10/11 08:04:39 [notice] 1473#1473: signal 3 (SIGQUIT) received from 4339, shutting down
+2025/10/11 08:04:39 [notice] 1474#1474: gracefully shutting down
+2025/10/11 08:04:39 [notice] 1475#1475: gracefully shutting down
+2025/10/11 08:04:39 [notice] 1476#1476: gracefully shutting down
+2025/10/11 08:04:39 [notice] 1477#1477: gracefully shutting down
+2025/10/11 08:04:39 [notice] 1475#1475: exiting
+2025/10/11 08:04:39 [notice] 1476#1476: exiting
+2025/10/11 08:04:39 [notice] 1476#1476: exit
+2025/10/11 08:04:39 [notice] 1477#1477: exiting
+2025/10/11 08:04:39 [notice] 1475#1475: exit
+2025/10/11 08:04:39 [notice] 1473#1473: signal 17 (SIGCHLD) received from 1476
+2025/10/11 08:04:39 [notice] 1473#1473: worker process 1476 exited with code 0
+2025/10/11 08:04:39 [notice] 1473#1473: signal 29 (SIGIO) received
+2025/10/11 08:04:39 [notice] 1477#1477: exit
+2025/10/11 08:04:39 [notice] 1473#1473: signal 17 (SIGCHLD) received from 1475
+2025/10/11 08:04:39 [notice] 1473#1473: worker process 1475 exited with code 0
+2025/10/11 08:04:39 [notice] 1473#1473: signal 29 (SIGIO) received
+2025/10/11 08:04:39 [notice] 1474#1474: exiting
+2025/10/11 08:04:39 [notice] 1473#1473: signal 17 (SIGCHLD) received from 1477
+2025/10/11 08:04:39 [notice] 1473#1473: worker process 1477 exited with code 0
+2025/10/11 08:04:39 [notice] 1473#1473: signal 29 (SIGIO) received
+2025/10/11 08:04:39 [notice] 1474#1474: exit
+2025/10/11 08:04:39 [notice] 1473#1473: signal 17 (SIGCHLD) received from 1474
+2025/10/11 08:04:39 [notice] 1473#1473: worker process 1474 exited with code 0
+2025/10/11 08:04:39 [notice] 1473#1473: exit
+2025/10/11 08:04:57 [notice] 1259#1259: using the "epoll" event method
+2025/10/11 08:04:57 [notice] 1259#1259: openresty/1.27.1.2
+2025/10/11 08:04:57 [notice] 1259#1259: OS: Linux 6.8.0-85-generic
+2025/10/11 08:04:57 [notice] 1259#1259: getrlimit(RLIMIT_NOFILE): 65536:65536
+2025/10/11 08:04:57 [notice] 1272#1272: start worker processes
+2025/10/11 08:04:57 [notice] 1272#1272: start worker process 1273
+2025/10/11 08:04:57 [notice] 1272#1272: start worker process 1274
+2025/10/11 08:04:57 [notice] 1272#1272: start worker process 1276
+2025/10/11 08:04:57 [notice] 1272#1272: start worker process 1277
+2025/10/11 09:53:42 [notice] 1272#1272: signal 3 (SIGQUIT) received from 3553, shutting down
+2025/10/11 09:53:42 [notice] 1273#1273: gracefully shutting down
+2025/10/11 09:53:42 [notice] 1274#1274: gracefully shutting down
+2025/10/11 09:53:42 [notice] 1276#1276: gracefully shutting down
+2025/10/11 09:53:42 [notice] 1277#1277: gracefully shutting down
+2025/10/11 09:53:42 [notice] 1273#1273: exiting
+2025/10/11 09:53:42 [notice] 1274#1274: exiting
+2025/10/11 09:53:42 [notice] 1276#1276: exiting
+2025/10/11 09:53:42 [notice] 1274#1274: exit
+2025/10/11 09:53:42 [notice] 1273#1273: exit
+2025/10/11 09:53:42 [notice] 1277#1277: exiting
+2025/10/11 09:53:42 [notice] 1277#1277: exit
+2025/10/11 09:53:42 [notice] 1272#1272: signal 17 (SIGCHLD) received from 1274
+2025/10/11 09:53:42 [notice] 1272#1272: worker process 1274 exited with code 0
+2025/10/11 09:53:42 [notice] 1276#1276: exit
+2025/10/11 09:53:42 [notice] 1272#1272: signal 29 (SIGIO) received
+2025/10/11 09:53:42 [notice] 1272#1272: signal 17 (SIGCHLD) received from 1273
+2025/10/11 09:53:42 [notice] 1272#1272: worker process 1273 exited with code 0
+2025/10/11 09:53:42 [notice] 1272#1272: signal 29 (SIGIO) received
+2025/10/11 09:53:42 [notice] 1272#1272: signal 17 (SIGCHLD) received from 1277
+2025/10/11 09:53:42 [notice] 1272#1272: worker process 1277 exited with code 0
+2025/10/11 09:53:42 [notice] 1272#1272: signal 29 (SIGIO) received
+2025/10/11 09:53:42 [notice] 1272#1272: signal 17 (SIGCHLD) received from 1276
+2025/10/11 09:53:42 [notice] 1272#1272: worker process 1276 exited with code 0
+2025/10/11 09:53:42 [notice] 1272#1272: exit
+2025/10/11 09:54:05 [notice] 1262#1262: using the "epoll" event method
+2025/10/11 09:54:05 [notice] 1262#1262: openresty/1.27.1.2
+2025/10/11 09:54:05 [notice] 1262#1262: OS: Linux 6.8.0-85-generic
+2025/10/11 09:54:05 [notice] 1262#1262: getrlimit(RLIMIT_NOFILE): 65536:65536
+2025/10/11 09:54:05 [notice] 1274#1274: start worker processes
+2025/10/11 09:54:05 [notice] 1274#1274: start worker process 1275
+2025/10/11 09:54:05 [notice] 1274#1274: start worker process 1276
+2025/10/11 09:54:05 [notice] 1274#1274: start worker process 1277
+2025/10/11 09:54:05 [notice] 1274#1274: start worker process 1278

@@ -304,7 +304,7 @@
                 
                 <div class="config-section">
                     <label>ZLM 服务器完整地址</label>
-                    <input type="text" id="serverUrl" value="http://172.16.100.159/index/api/webrtc" placeholder="http://172.16.100.159/index/api/webrtc">
+                    <input type="text" id="serverUrl" value="http://streams-12.vhalo.net:8888/index/api/webrtc" placeholder="http://streams-12.vhalo.net:8888/index/api/webrtc">
                     <small style="color: #777; font-size: 12px;">包含协议、域名、端口和路径</small>
                 </div>
                 
@@ -320,19 +320,19 @@
                 
                 <div class="config-section">
                     <label>TURN 服务器地址</label>
-                    <input type="text" id="turnServer" value="turn:172.16.100.159:3478?transport=udp" placeholder="turn:172.16.100.159:3478?transport=udp">
+                    <input type="text" id="turnServer" value="turn:streams-cm-2.vhalo.net:3478?transport=udp" placeholder="turn:streams-cm-2.vhalo.net:3478?transport=udp">
                     <small style="color: #777; font-size: 12px;">通常和 ZLM 服务器域名相同</small>
                 </div>
                 
                 <div class="config-section">
                     <label>外部 IP/域名（用于 SDP）</label>
-                    <input type="text" id="externIP" value="172.16.100.159" placeholder="例如: your-domain.com 或公网IP">
+                    <input type="text" id="externIP" value="" placeholder="例如: your-domain.com 或公网IP">
                     <small style="color: #777; font-size: 12px;">替换 SDP 中的内网 IP，留空则自动从 TURN 地址提取</small>
                 </div>
                 
                 <div class="config-section">
                     <label>TURN 用户名</label>
-                    <input type="text" id="turnUsername" value="NAwR6DMuD7UNuTMh" placeholder="ICE 用户名">
+                    <input type="text" id="turnUsername" value="wawa" placeholder="ICE 用户名">
                 </div>
                 
                 <div class="config-section">
@@ -341,21 +341,22 @@
                 </div>
                 
                 <div class="config-section">
-                    <label>ICE 传输策略</label>
+                    <label>ICE 传输策略（客户端）</label>
                     <select id="icePolicy">
-                        <option value="all">all - 尝试所有类型（P2P + TURN）</option>
-                        <option value="relay" selected>relay - 强制使用 TURN 中继 ⭐</option>
+                        <option value="all" selected>all - 优先 P2P，失败则 TURN ⭐</option>
+                        <option value="relay">relay - 强制客户端用 TURN（测试 TURN）</option>
                     </select>
+                    <small style="color: #777; font-size: 12px;">⚠️ 服务器配置保持 iceTransportPolicy=0</small>
                 </div>
                 
                 <div class="info-box">
-                    <h3>💡 使用说明（远程服务器）</h3>
+                    <h3>💡 使用说明</h3>
                     <ul>
-                        <li>填写完整的服务器地址（包含 https://）</li>
-                        <li>修改 TURN 地址为你的域名（不带 https://）</li>
-                        <li>选择 "relay" 强制使用 TURN 中继</li>
-                        <li>确认流 ID 存在（可先推流测试）</li>
-                        <li>点击"开始测试"后查看日志</li>
+                        <li><strong>优先 P2P 模式（推荐）：</strong>选择 "all" 策略，能直连就直连，不行才用 TURN</li>
+                        <li><strong>强制中继模式（测试）：</strong>选择 "relay" 策略，验证 TURN 服务器是否工作</li>
+                        <li>填写完整的服务器地址（包含 http:// 或 https://）</li>
+                        <li>配置 TURN 服务器地址和认证信息</li>
+                        <li>点击"开始测试"或"仅测试 TURN 连接"</li>
                     </ul>
                 </div>
                 
@@ -821,8 +822,10 @@
                             log(`     协议: ${r.protocol}`, 'info');
                             if (r.relayProtocol) {
                                 log(`     中继协议: ${r.relayProtocol}`, 'info');
+                                log(`     ✅ 检测到本地 relayProtocol，确认使用 TURN！`, 'success');
                             }
-                            if (type === 'relay') foundRelay = true;
+                            // 🔥 增强检测：relay 候选或有 relayProtocol 的候选都算 TURN
+                            if (type === 'relay' || r.relayProtocol) foundRelay = true;
                         }
                         if (r.id === report.remoteCandidateId) {
                             candidateInfo.remote = r;
@@ -830,8 +833,32 @@
                             log(`   远端候选: ${type}`, 'info');
                             log(`     地址: ${r.address || r.ip}:${r.port}`, 'info');
                             log(`     协议: ${r.protocol}`, 'info');
+                            // 🔥 增强检测：检查远端候选的 relayProtocol
+                            if (r.relayProtocol) {
+                                log(`     中继协议: ${r.relayProtocol}`, 'info');
+                                log(`     ✅ 检测到远端 relayProtocol，确认使用 TURN！`, 'success');
+                                foundRelay = true;
+                            }
+                            // 🔥 增强检测：远端是 relay 类型也算 TURN
+                            if (type === 'relay') {
+                                foundRelay = true;
+                            }
                         }
                     });
+                    
+                    // 🔥 新增：检查候选对的详细信息
+                    log('   ---', 'info');
+                    log(`   📊 候选对详细信息:`, 'info');
+                    log(`     本地类型: ${candidateInfo.local?.candidateType || candidateInfo.local?.type}`, 'info');
+                    log(`     远端类型: ${candidateInfo.remote?.candidateType || candidateInfo.remote?.type}`, 'info');
+                    log(`     本地 relayProtocol: ${candidateInfo.local?.relayProtocol || '无'}`, 'info');
+                    log(`     远端 relayProtocol: ${candidateInfo.remote?.relayProtocol || '无'}`, 'info');
+                    
+                    // 🔥 最终判断：只要本地或远端有 relayProtocol，就是 TURN
+                    if (candidateInfo.local?.relayProtocol || candidateInfo.remote?.relayProtocol) {
+                        log(`     🎯 判定：通过 relayProtocol 确认使用 TURN！`, 'success');
+                        foundRelay = true;
+                    }
                 }
             });
             
@@ -928,6 +955,8 @@
             log('', 'info');
             
             // 尝试从当前 URL 获取域名（如果页面部署在服务器上）
+            // ⚠️ 已禁用自动检测，使用HTML中写死的默认配置
+            /*
             const hostname = window.location.hostname;
             if (hostname && hostname !== 'localhost' && hostname !== '') {
                 const protocol = window.location.protocol;
@@ -949,6 +978,9 @@
                 log('⚠️  页面在本地打开，请手动配置服务器地址', 'warn');
                 log('', 'info');
             }
+            */
+            log('💡 使用预设配置，如需修改请直接编辑输入框', 'info');
+            log('', 'info');
         };
         
         // 定期更新统计（每 5 秒）

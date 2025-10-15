@@ -380,57 +380,79 @@ void WebRtcSignalingSession::sendRegisterAccept(Json::Value& body, const std::st
     body[CLASS_KEY] = CLASS_VALUE_ACCEPT;
 
     Json::Value ice_server;
-    GET_CONFIG(uint16_t, icePort, Rtc::kIcePort);
-    GET_CONFIG(bool, enable_turn, Rtc::kEnableTurn);
-    GET_CONFIG(string, iceUfrag, Rtc::kIceUfrag);
-    GET_CONFIG(string, icePwd, Rtc::kIcePwd);
-    GET_CONFIG_FUNC(std::vector<std::string>, extern_ips, Rtc::kExternIP, [](string str) {
-        std::vector<std::string> ret;
-        if (str.length()) {
-            ret = split(str, ",");
+    
+    // 读取外部 TURN 服务器配置
+    GET_CONFIG(string, externalTurnUrl, Rtc::kExternalTurnUrl);
+    GET_CONFIG(string, externalTurnUsername, Rtc::kExternalTurnUsername);
+    GET_CONFIG(string, externalTurnPassword, Rtc::kExternalTurnPassword);
+    
+    // 判断是否使用外部 TURN 服务器
+    bool useExternalTurn = !externalTurnUrl.empty();
+    
+    if (useExternalTurn) {
+        // 使用外部 TURN 服务器配置
+        InfoL << "使用外部 TURN 服务器: " << externalTurnUrl;
+        
+        ice_server[URL_KEY] = externalTurnUrl;
+        ice_server[UFRAG_KEY] = externalTurnUsername;
+        ice_server[PWD_KEY] = externalTurnPassword;
+        
+        Json::Value ice_servers;
+        ice_servers.append(ice_server);
+        body[ICE_SERVERS_KEY] = ice_servers;
+        
+    } else {
+        // 使用内置 TURN 服务器（原有逻辑）
+        InfoL << "使用内置 TURN 服务器";
+        
+        GET_CONFIG(uint16_t, icePort, Rtc::kIcePort);
+        GET_CONFIG(bool, enable_turn, Rtc::kEnableTurn);
+        GET_CONFIG(string, iceUfrag, Rtc::kIceUfrag);
+        GET_CONFIG(string, icePwd, Rtc::kIcePwd);
+        GET_CONFIG_FUNC(std::vector<std::string>, extern_ips, Rtc::kExternIP, [](string str) {
+            std::vector<std::string> ret;
+            if (str.length()) {
+                ret = split(str, ",");
+            }
+            translateIPFromEnv(ret);
+            return ret;
+        });
+
+        // 如果配置了extern_ips, 则选择第一个作为turn服务器的ip
+        // 如果没配置获取网卡接口
+        std::string extern_ip;
+        if (!extern_ips.empty()) {
+            extern_ip = extern_ips.front();
+        } else {
+            extern_ip = SockUtil::get_local_ip();
         }
-        translateIPFromEnv(ret);
-        return ret;
-    });
 
-    // 如果配置了extern_ips, 则选择第一个作为turn服务器的ip
-    // 如果没配置获取网卡接口
-    std::string extern_ip;
-    if (!extern_ips.empty()) {
-        extern_ip = extern_ips.front();
-    } else {
-        extern_ip = SockUtil::get_local_ip();
+        std::string url;
+        // SUPPORT:
+        // stun:host:port?transport=udp
+        // turn:host:port?transport=udp
+        
+        // NOT SUPPORT NOW TODO:
+        // turns:host:port?transport=udp
+        // turn:host:port?transport=tcp
+        // turns:host:port?transport=tcp
+        // stuns:host:port?transport=udp
+        // stuns:host:port?transport=udp
+        // stun:host:port?transport=tcp
+        if (enable_turn) {
+            url = "turn:" + extern_ip + ":" + std::to_string(icePort) + "?transport=udp";
+        } else {
+            url = "stun:" + extern_ip + ":" + std::to_string(icePort) + "?transport=udp";
+        }
+
+        ice_server[URL_KEY] = url;
+        ice_server[UFRAG_KEY] = iceUfrag;
+        ice_server[PWD_KEY] = icePwd;
+
+        Json::Value ice_servers;
+        ice_servers.append(ice_server);
+        body[ICE_SERVERS_KEY] = ice_servers;
     }
-
-    // TODO: support multi extern ip
-    // TODO: support third stun/turn server
-
-    std::string url;
-    // SUPPORT:
-    // stun:host:port?transport=udp
-    // turn:host:port?transport=udp
-
-    // NOT SUPPORT NOW TODO:
-    // turns:host:port?transport=udp
-    // turn:host:port?transport=tcp
-    // turns:host:port?transport=tcp
-    // stuns:host:port?transport=udp
-    // stuns:host:port?transport=udp
-    // stun:host:port?transport=tcp
-    if (enable_turn) {
-        url = "turn:" + extern_ip + ":" + std::to_string(icePort) + "?transport=udp";
-    } else {
-        url = "stun:" + extern_ip + ":" + std::to_string(icePort) + "?transport=udp";
-    }
-
-    ice_server[URL_KEY] = url;
-    ice_server[UFRAG_KEY] = iceUfrag;
-    ice_server[PWD_KEY] = icePwd;
-
-    Json::Value ice_servers;
-    ice_servers.append(ice_server);
-
-    body[ICE_SERVERS_KEY] = ice_servers;
 
     sendAcceptResponse(body, transaction_id);
 }

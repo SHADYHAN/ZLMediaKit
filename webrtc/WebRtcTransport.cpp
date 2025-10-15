@@ -72,6 +72,11 @@ const string kIceUfrag = RTC_FIELD "iceUfrag";
 const string kIcePwd = RTC_FIELD "icePwd";
 const string kIceTransportPolicy = RTC_FIELD "iceTransportPolicy";
 
+// 外部 TURN 服务器配置（优先级高于内置 TURN）
+const string kExternalTurnUrl = RTC_FIELD "externalTurnUrl";
+const string kExternalTurnUsername = RTC_FIELD "externalTurnUsername";
+const string kExternalTurnPassword = RTC_FIELD "externalTurnPassword";
+
 // 比特率设置  [AUTO-TRANSLATED:2c75f5bc]
 // Bitrate setting
 const string kStartBitrate = RTC_FIELD "start_bitrate";
@@ -104,6 +109,11 @@ static onceToken token([]() {
     mINI::Instance()[kIceTransportPolicy] = 0;  // 默认值：不限制(kAll)
     mINI::Instance()[kIceUfrag] = "ZLMediaKit";
     mINI::Instance()[kIcePwd] = "ZLMediaKit";
+    
+    // 外部 TURN 服务器默认为空（不启用）
+    mINI::Instance()[kExternalTurnUrl] = "";
+    mINI::Instance()[kExternalTurnUsername] = "";
+    mINI::Instance()[kExternalTurnPassword] = "";
 });
 
 } // namespace Rtc

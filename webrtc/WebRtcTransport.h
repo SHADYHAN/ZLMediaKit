@@ -55,6 +55,11 @@ extern const std::string kIceUfrag;
 extern const std::string kIcePwd;
 extern const std::string kExternIP;
 extern const std::string kInterfaces;
+
+// 外部 TURN 服务器配置
+extern const std::string kExternalTurnUrl;
+extern const std::string kExternalTurnUsername;
+extern const std::string kExternalTurnPassword;
 }//namespace RTC
 
 class WebRtcInterface {
