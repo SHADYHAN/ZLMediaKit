@@ -275,7 +275,8 @@ AudioTranscoder::AudioTranscoder(const Track::Ptr &track,
     
     // 创建重采样器（转换为目标采样率和格式）
 #if LIBAVCODEC_VERSION_INT >= AV_VERSION_INT(61, 0, 0)
-    AVChannelLayout ch_layout;
+    // Initialize AVChannelLayout properly for FFmpeg 8+ compatibility
+    AVChannelLayout ch_layout = {};  // Zero-initialize first
     if (target_channels == 1) {
         ch_layout = AV_CHANNEL_LAYOUT_MONO;
     } else {

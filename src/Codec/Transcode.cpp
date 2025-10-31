@@ -600,8 +600,21 @@ void FFmpegDecoder::onDecode(const FFmpegFrame::Ptr &frame) {
 #if LIBAVCODEC_VERSION_INT >= FF_CODEC_VER_7_1
 FFmpegSwr::FFmpegSwr(AVSampleFormat output, AVChannelLayout *ch_layout, int samplerate) {
     _target_format = output;
-    av_channel_layout_copy(&_target_ch_layout, ch_layout);
     _target_samplerate = samplerate;
+    
+    // Validate input parameter for FFmpeg 8+ compatibility
+    if (!ch_layout) {
+        throw std::invalid_argument("AVChannelLayout pointer cannot be nullptr");
+    }
+    
+    // Initialize _target_ch_layout to zero before copying to avoid using uninitialized memory
+    memset(&_target_ch_layout, 0, sizeof(_target_ch_layout));
+    
+    // Copy channel layout - av_channel_layout_copy will validate and copy properly
+    int ret = av_channel_layout_copy(&_target_ch_layout, ch_layout);
+    if (ret < 0) {
+        throw std::runtime_error("Failed to copy AVChannelLayout: invalid source layout");
+    }
 }
 #else
 FFmpegSwr::FFmpegSwr(AVSampleFormat output, int channel, int channel_layout, int samplerate) {
