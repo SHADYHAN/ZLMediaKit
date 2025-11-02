@@ -35,6 +35,15 @@ OpusEncoder::~OpusEncoder() {
         av_audio_fifo_free(_fifo);
         _fifo = nullptr;
     }
+    
+    // 输出流控统计信息
+    if (_total_input_frames > 0) {
+        InfoL << "OpusEncoder destroyed | Flow control stats:"
+              << " total_input=" << _total_input_frames
+              << ", dropped=" << _dropped_frames 
+              << " (" << (_dropped_frames * 100.0 / _total_input_frames) << "%)"
+              << ", overflow_events=" << _overflow_events;
+    }
 }
 
 bool OpusEncoder::init() {
@@ -161,13 +170,37 @@ bool OpusEncoder::encodeFrame(const FFmpegFrame::Ptr &pcm_frame) {
         return false;
     }
     
-    // FIFO 溢出保护：如果积压过多，丢弃一些旧样本
+    _total_input_frames++;  // 统计总输入帧数
+    
+    // 🚦 流控机制：多级防护策略（推流端不可控情况下的被动防御）
     int fifo_size = av_audio_fifo_size(_fifo);
-    if (fifo_size > _context->frame_size * 10) {
-        int drain_samples = _context->frame_size * 2;
-        WarnL << "FIFO overflow detected (" << fifo_size << " samples), dropping " 
-              << drain_samples << " old samples";
+    int capacity = _context->frame_size * 10;  // 基础容量
+    int max_capacity = _context->frame_size * 15;  // 最大容量（临时缓冲）
+    
+    // 🔴 红色警戒：超过最大容量，必须丢弃
+    if (fifo_size > max_capacity) {
+        int drain_samples = _context->frame_size * 5;
+        _overflow_events++;
+        ErrorL << "FIFO critical overflow (" << fifo_size << "/" << max_capacity 
+               << " samples), dropping " << drain_samples << " old samples"
+               << " | Stats: input=" << _total_input_frames 
+               << ", dropped=" << _dropped_frames 
+               << ", overflow_events=" << _overflow_events;
         av_audio_fifo_drain(_fifo, drain_samples);
+    }
+    // 🟡 黄色警告：超过基础容量，选择性丢帧
+    else if (fifo_size > capacity) {
+        // 轻度拥堵：每3帧丢1帧（减少33%负载）
+        if (++_drop_counter % 3 == 0) {
+            _dropped_frames++;
+            WarnL << "FIFO congestion (" << fifo_size << "/" << capacity 
+                  << "), dropping incoming frame to prevent overflow"
+                  << " | Drop rate: " << (_dropped_frames * 100.0 / _total_input_frames) << "%";
+            return true;  // 丢弃当前帧，假装成功
+        }
+    } else {
+        // ✅ 恢复正常，重置丢帧计数器
+        _drop_counter = 0;
     }
     
     // 将输入帧写入 FIFO
@@ -313,7 +346,9 @@ AudioTranscoder::AudioTranscoder(const Track::Ptr &track,
         throw std::runtime_error("Failed to create Opus track");
     }
     
-    // 设置解码回调（直接捕获 this，生命周期由外部保证）
+    // 设置解码回调
+    // 注意：这里使用裸 this 指针，生命周期由析构函数中的 stopThread 保证
+    // 析构时会先停止线程，再析构成员，确保回调不会访问已销毁的对象
     _decoder->setOnDecode([this](const FFmpegFrame::Ptr &frame) {
         onDecoded(frame);
     });

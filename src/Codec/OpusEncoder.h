@@ -73,6 +73,12 @@ private:
     std::shared_ptr<AVFrame> _encode_frame;  // 复用编码帧
     toolkit::ResourcePool<FrameImp> _frame_pool;
     AVAudioFifo *_fifo = nullptr;
+    
+    // 流控统计（用于监控和调试）
+    uint64_t _total_input_frames = 0;
+    uint64_t _dropped_frames = 0;
+    uint64_t _overflow_events = 0;
+    int _drop_counter = 0;  // 丢帧计数器（实例独立）
 };
 
 /**
