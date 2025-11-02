@@ -105,7 +105,13 @@ bool OpusEncoder::init() {
     _encode_frame->sample_rate = _context->sample_rate;
     
 #if LIBAVCODEC_VERSION_INT >= AV_VERSION_INT(61, 0, 0)
-    av_channel_layout_copy(&_encode_frame->ch_layout, &_context->ch_layout);
+    // Initialize before copy (av_frame_alloc should zero it, but be explicit for safety)
+    memset(&_encode_frame->ch_layout, 0, sizeof(_encode_frame->ch_layout));
+    int ret_ch = av_channel_layout_copy(&_encode_frame->ch_layout, &_context->ch_layout);
+    if (ret_ch < 0) {
+        ErrorL << "Failed to copy channel layout: " << ffmpeg_err(ret_ch);
+        return false;
+    }
 #else
     _encode_frame->channel_layout = _context->channel_layout;
     _encode_frame->channels = _context->channels;
@@ -237,7 +243,13 @@ bool OpusEncoder::encodeFrame(const FFmpegFrame::Ptr &pcm_frame) {
 
 void OpusEncoder::onEncoded(const Frame::Ptr &opus_frame) {
     if (_on_output) {
-        _on_output(opus_frame);
+        try {
+            _on_output(opus_frame);
+        } catch (std::exception &ex) {
+            WarnL << "Exception in OpusEncoder callback: " << ex.what();
+        } catch (...) {
+            WarnL << "Unknown exception in OpusEncoder callback";
+        }
     }
 }
 
@@ -315,6 +327,19 @@ AudioTranscoder::AudioTranscoder(const Track::Ptr &track,
 }
 
 AudioTranscoder::~AudioTranscoder() {
+    // Clear callbacks first to prevent any further calls during destruction
+    _on_output = nullptr;
+    
+    // Stop encoder thread before decoder to prevent callback issues
+    if (_encoder) {
+        _encoder->stopThread(true);
+    }
+    
+    // Stop decoder thread
+    if (_decoder) {
+        _decoder->stopThread(true);
+    }
+    
     if (_input_frame_count > 0) {
         InfoL << "AudioTranscoder destroyed"
               << ", in=" << _input_frame_count
@@ -357,14 +382,20 @@ void AudioTranscoder::onEncoded(const Frame::Ptr &opus_frame) {
     
     _output_frame_count++;
     
-    // 更新输出 Track
-    if (_output_track) {
-        _output_track->inputFrame(opus_frame);
-    }
-    
-    // 回调给上层
-    if (_on_output) {
-        _on_output(opus_frame);
+    try {
+        // 更新输出 Track
+        if (_output_track) {
+            _output_track->inputFrame(opus_frame);
+        }
+        
+        // 回调给上层
+        if (_on_output) {
+            _on_output(opus_frame);
+        }
+    } catch (std::exception &ex) {
+        WarnL << "Exception in AudioTranscoder::onEncoded: " << ex.what();
+    } catch (...) {
+        WarnL << "Unknown exception in AudioTranscoder::onEncoded";
     }
 }
 

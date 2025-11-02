@@ -672,8 +672,13 @@ FFmpegFrame::Ptr FFmpegSwr::inputFrame(const FFmpegFrame::Ptr &frame) {
         out->get()->format = _target_format;
 
 #if LIBAVCODEC_VERSION_INT >= FF_CODEC_VER_7_1
-        out->get()->ch_layout = _target_ch_layout;
-        av_channel_layout_copy(&(out->get()->ch_layout), &_target_ch_layout);
+        // Initialize and deep copy channel layout (don't use direct assignment to avoid shallow copy issues)
+        memset(&out->get()->ch_layout, 0, sizeof(out->get()->ch_layout));
+        int ret_ch = av_channel_layout_copy(&(out->get()->ch_layout), &_target_ch_layout);
+        if (ret_ch < 0) {
+            WarnL << "Failed to copy channel layout in swr output: " << ffmpeg_err(ret_ch);
+            return nullptr;
+        }
 #else
         out->get()->channel_layout = _target_channel_layout;
         out->get()->channels = _target_channels;
