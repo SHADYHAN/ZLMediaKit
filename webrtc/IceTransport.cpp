@@ -26,11 +26,22 @@ using namespace mediakit;
 namespace RTC {
 
 #define RTC_FIELD "rtc."
-const string kPortRange = RTC_FIELD "port_range";
+const string kPortRange = RTC_FIELD "portRange";  // 注意：匹配config.ini中的大小写
 const string kMaxStunRetry = RTC_FIELD "max_stun_retry";
+// TURN相关配置
+const string kAllocationLifetime = RTC_FIELD "allocationLifetime";
+const string kAllocationMaxLifetime = RTC_FIELD "allocationMaxLifetime";
+const string kTurnRealm = RTC_FIELD "turnRealm";
+const string kAllocationCheckInterval = RTC_FIELD "allocationCheckInterval";
+
 static onceToken token([]() {
-    mINI::Instance()[kPortRange] = "49152-65535";
+    mINI::Instance()[kPortRange] = "50000-65000";      // 与config.ini保持一致
     mINI::Instance()[kMaxStunRetry] = 7;
+    // TURN默认配置
+    mINI::Instance()[kAllocationLifetime] = 1800;      // 30分钟
+    mINI::Instance()[kAllocationMaxLifetime] = 3600;   // 1小时
+    mINI::Instance()[kTurnRealm] = "ZLMediaKit";
+    mINI::Instance()[kAllocationCheckInterval] = 60;   // 60秒检查一次
 });
 
 static uint32_t calIceCandidatePriority(CandidateInfo::AddressType type, uint32_t component_id = 1) {
@@ -686,6 +697,26 @@ IceServer::IceServer(Listener* listener, std::string ufrag, std::string password
 
 }
 
+void IceServer::initialize() {
+    // 调用基类的初始化
+    IceTransport::initialize();
+    
+    GET_CONFIG(bool, enable_turn, Rtc::kEnableTurn);
+    if (enable_turn) {
+        // 启动定期检查allocation超时的定时器
+        GET_CONFIG(uint32_t, check_interval, kAllocationCheckInterval);
+        weak_ptr<IceServer> weak_self = static_pointer_cast<IceServer>(shared_from_this());
+        _allocation_timer = std::make_shared<Timer>((float)check_interval, [weak_self]() {
+            auto strong_self = weak_self.lock();
+            if (!strong_self) {
+                return false;
+            }
+            strong_self->checkAllocationTimeout();
+            return true;
+        }, getPoller());
+    }
+}
+
 bool IceServer::processSocketData(const uint8_t* data, size_t len, const Pair::Ptr& pair) {
     if (!_session_pair) {
         _session_pair = pair;
@@ -699,9 +730,23 @@ void IceServer::processRelayPacket(const Buffer::Ptr &buffer, const Pair::Ptr& p
     sockaddr_storage peer_addr;
     pair->get_peer_addr(peer_addr);
 
+    // 检查Permission，但对于没有Permission的peer，自动添加一个（宽松模式）
+    // 这解决了CreatePermission请求晚于媒体数据到达的时序问题
     if (!hasPermission(peer_addr)) {
-        WarnL << "No permission exists for peer: " << pair->get_peer_ip() << ":" << pair->get_peer_port();
-        return;
+        // RFC 5766: 如果接收到来自没有Permission的peer的数据
+        // 服务器应该静默丢弃，或者创建一个Permission（宽松实现）
+        InfoL << "Auto-creating permission for peer: " << pair->get_peer_ip() << ":" << pair->get_peer_port()
+              << " (no CreatePermission received yet, using permissive mode)";
+        addPermission(peer_addr);
+    }
+
+    // 自动续期：每次收到来自远程peer的数据，说明客户端还在使用，自动延长allocation
+    // 这对直播流非常重要，避免因客户端未发送Refresh导致allocation过期
+    if (_session_pair) {
+        sockaddr_storage client_addr;
+        _session_pair->get_peer_addr(client_addr);
+        GET_CONFIG(uint32_t, lifetime, kAllocationLifetime);
+        updateAllocationExpireTime(client_addr, lifetime);
     }
 
     auto forward_pair = std::make_shared<Pair>(_session_pair->_socket, pair->_socket->get_peer_ip(), pair->_socket->get_peer_port());
@@ -715,14 +760,51 @@ void IceServer::processRelayPacket(const Buffer::Ptr &buffer, const Pair::Ptr& p
 
 void IceServer::handleAllocateRequest(const StunPacket::Ptr& packet, const Pair::Ptr& pair) {
     // TraceL;
+    
+    // 获取peer地址
+    sockaddr_storage peer_addr;
+    pair->get_peer_addr(peer_addr);
+    
+    // 检查是否已经存在allocation
+    auto existing_it = _allocations.find(peer_addr);
+    if (existing_it != _allocations.end()) {
+        InfoL << "Allocation already exists for " << addrToStr(peer_addr) << ", refreshing it";
+        // 已存在，刷新过期时间
+        GET_CONFIG(uint32_t, default_lifetime, kAllocationLifetime);
+        GET_CONFIG(uint32_t, max_lifetime, kAllocationMaxLifetime);
+        updateAllocationExpireTime(peer_addr, default_lifetime);
+        
+        auto response = packet->createSuccessResponse();
+        response->setUfrag(_ufrag);
+        response->setPassword(_password);
+        
+        auto attr_xor_mapped_address = std::make_shared<StunAttrXorMappedAddress>(response->getTransactionId());
+        attr_xor_mapped_address->setAddr(peer_addr);
+        response->addAttribute(std::move(attr_xor_mapped_address));
+        
+        // 返回已有的relay地址
+        auto& relayed_pair = _relayed_pairs[peer_addr];
+        sockaddr_storage relayed_addr = SockUtil::make_sockaddr(
+            relayed_pair.second->get_local_ip().data(), 
+            relayed_pair.second->get_local_port());
+        auto attr_xor_relayed_address = std::make_shared<StunAttrXorRelayedAddress>(response->getTransactionId());
+        attr_xor_relayed_address->setAddr(relayed_addr);
+        response->addAttribute(std::move(attr_xor_relayed_address));
+        
+        // 返回较长的lifetime给客户端，避免客户端主动释放
+        auto attr_lifetime = std::make_shared<StunAttrLifeTime>();
+        attr_lifetime->setLifetime(max_lifetime);
+        response->addAttribute(std::move(attr_lifetime));
+        
+        sendPacket(response, pair);
+        return;
+    }
+    
     auto response = packet->createSuccessResponse();
     response->setUfrag(_ufrag);
     response->setPassword(_password);
 
     // Add XOR-MAPPED-ADDRESS.
-    sockaddr_storage peer_addr;
-    pair->get_peer_addr(peer_addr);
-
     auto attr_xor_mapped_address = std::make_shared<StunAttrXorMappedAddress>(response->getTransactionId());
     attr_xor_mapped_address->setAddr(peer_addr);
     response->addAttribute(std::move(attr_xor_mapped_address));
@@ -734,15 +816,114 @@ void IceServer::handleAllocateRequest(const StunPacket::Ptr& packet, const Pair:
     attr_xor_relayed_address->setAddr(relayed_addr);
     response->addAttribute(std::move(attr_xor_relayed_address));
 
+    // 从配置读取lifetime
+    GET_CONFIG(uint32_t, default_lifetime, kAllocationLifetime);
+    GET_CONFIG(uint32_t, max_lifetime, kAllocationMaxLifetime);
+    
+    // 客户端可以在Allocate请求中指定lifetime
+    auto attr_requested_lifetime = packet->getAttribute<StunAttrLifeTime>();
+    uint32_t requested_lifetime = attr_requested_lifetime ? attr_requested_lifetime->getLifetime() : max_lifetime;
+    uint32_t actual_lifetime = std::min(requested_lifetime, max_lifetime);
+    
+    if (actual_lifetime == 0) {
+        actual_lifetime = max_lifetime;
+    }
+    
+    // 返回给客户端较长的lifetime（max_lifetime），避免客户端主动释放
+    // 服务器端会通过自动续期机制来管理实际的过期时间
     auto attr_lifetime = std::make_shared<StunAttrLifeTime>();
-    attr_lifetime->setLifetime(600);
+    attr_lifetime->setLifetime(actual_lifetime);
     response->addAttribute(std::move(attr_lifetime));
+    
+    // 记录allocation信息
+    // 注意：内部使用 default_lifetime 来设置初始过期时间，配合自动续期使用
+    auto& relayed_pair_info = _relayed_pairs[peer_addr];
+    uint64_t expire_time = toolkit::getCurrentMillisecond() + (uint64_t)default_lifetime * 1000;
+    _allocations[peer_addr] = AllocationInfo(relayed_pair_info.second, relayed_pair_info.first, expire_time);
+    
+    InfoL << "Created allocation for " << addrToStr(peer_addr)
+          << ", client_lifetime=" << actual_lifetime << "s (reported to client)"
+          << ", server_lifetime=" << default_lifetime << "s (actual server-side)";
+    
+    // 注意：不要在这里添加Permission！
+    // Permission应该由客户端通过CreatePermission请求来指定远端peer的地址
+    // 这里的peer_addr是客户端自己的地址，不是远端peer
+    
+    InfoL << "Allocated relay for " << addrToStr(peer_addr) 
+          << ", relay addr: " << socket->get_local_ip() << ":" << socket->get_local_port()
+          << ", lifetime=" << actual_lifetime << " seconds";
  
     sendPacket(response, pair);
 }
 
 void IceServer::handleRefreshRequest(const StunPacket::Ptr& packet, const Pair::Ptr& pair) {
     // TraceL
+    
+    // 读取客户端请求的lifetime
+    auto attr_lifetime = packet->getAttribute<StunAttrLifeTime>();
+    uint32_t requested_lifetime = attr_lifetime ? attr_lifetime->getLifetime() : 0;
+    
+    // 获取peer地址
+    sockaddr_storage peer_addr;
+    pair->get_peer_addr(peer_addr);
+    
+    // 如果lifetime为0，表示释放allocation
+    if (requested_lifetime == 0) {
+        InfoL << "Client requests to release allocation: " << addrToStr(peer_addr);
+        _allocations.erase(peer_addr);
+        _relayed_pairs.erase(peer_addr);
+        
+        auto response = packet->createSuccessResponse();
+        response->setUfrag(_ufrag);
+        response->setPassword(_password);
+        
+        auto attr = std::make_shared<StunAttrLifeTime>();
+        attr->setLifetime(0);
+        response->addAttribute(std::move(attr));
+        
+        sendPacket(response, pair);
+        return;
+    }
+    
+    // 检查allocation是否存在
+    auto it = _allocations.find(peer_addr);
+    if (it == _allocations.end()) {
+        WarnL << "Refresh request for non-existent allocation: " << addrToStr(peer_addr);
+        sendErrorResponse(packet, pair, StunAttrErrorCode::Code::AllocationMismatch);
+        return;
+    }
+    
+    // 限制lifetime在合理范围内
+    GET_CONFIG(uint32_t, default_lifetime, kAllocationLifetime);
+    GET_CONFIG(uint32_t, max_lifetime, kAllocationMaxLifetime);
+    
+    if (requested_lifetime == 0 || requested_lifetime > max_lifetime) {
+        requested_lifetime = max_lifetime;
+    }
+    
+    uint32_t actual_lifetime = std::min(requested_lifetime, max_lifetime);
+    
+    // 更新allocation的过期时间（使用 default_lifetime，配合自动续期）
+    updateAllocationExpireTime(peer_addr, default_lifetime);
+    
+    // 注意：Refresh时不刷新permission
+    // Permission是独立的，应该通过CreatePermission单独管理
+    // 自动刷新由定时器在checkAllocationTimeout中完成
+    
+    InfoL << "Refresh allocation for " << addrToStr(peer_addr) 
+          << ", client_lifetime=" << actual_lifetime << "s (reported to client)"
+          << ", server_lifetime=" << default_lifetime << "s (actual server-side)";
+    
+    // 返回成功响应
+    auto response = packet->createSuccessResponse();
+    response->setUfrag(_ufrag);
+    response->setPassword(_password);
+    
+    auto attr = std::make_shared<StunAttrLifeTime>();
+    attr->setLifetime(actual_lifetime);
+    response->addAttribute(std::move(attr));
+    
+    sendPacket(response, pair);
 }
 
 void IceServer::handleCreatePermissionRequest(const StunPacket::Ptr& packet, const Pair::Ptr& pair) {
@@ -813,11 +994,13 @@ void IceServer::handleSendIndication(const StunPacket::Ptr& packet, const Pair::
         return;
     }
 
-    // 检查是否有对应peer地址的权限
+    // 检查是否有对应peer地址的权限，使用宽容模式
     auto addr = peer_addr->getAddr();
     if (!hasPermission(addr)) {
-        WarnL << "No permission exists for peer address";
-        return;
+        // 宽容模式：自动创建 permission
+        // 这对于客户端实现不完善的情况很重要，避免因 permission 过期导致 RTCP 丢失
+        InfoL << "Auto-creating permission for SendIndication to peer: " << addrToStr(addr);
+        addPermission(addr);
     }
 
     auto buffer = data->getData();
@@ -858,8 +1041,9 @@ void IceServer::sendUnauthorizedResponse(const StunPacket::Ptr& packet, const Pa
         attr_nonce->setNonce(nonce);
         response->addAttribute(std::move(attr_nonce));
 
-        auto attr_realm = std::make_shared<StunAttrRealm>(); 
-        attr_realm->setRealm("ZLM"); //TODO: use config.ini
+        auto attr_realm = std::make_shared<StunAttrRealm>();
+        GET_CONFIG(string, realm, kTurnRealm);
+        attr_realm->setRealm(realm);
         response->addAttribute(std::move(attr_realm));
         sendPacket(response, pair);
         return;
@@ -1011,9 +1195,12 @@ void IceServer::relayBackingData(const toolkit::Buffer::Ptr& buffer, const Pair:
     auto forward_pair = std::make_shared<Pair>(it->second.second->_socket,
         SockUtil::inet_ntoa((const struct sockaddr *)&peer_addr), SockUtil::inet_port((const struct sockaddr *)&peer_addr));
 
+    // 发送数据（客户端 -> relay -> 远端peer，通常是RTCP反馈）
     sendSocketData(buffer, forward_pair);
 #if 0
-    DebugL << "relay backing " << forward_pair->dumpString(1);
+    DebugL << "relay backing data from client " << addrToStr(addr) 
+           << " to remote peer " << addrToStr(peer_addr)
+           << ", size: " << buffer->size();
 #endif
 }
 
@@ -1044,6 +1231,76 @@ SocketHelper::Ptr IceServer::createRelayedUdpSocket(const std::string &peer_host
     socket->startConnect(peer_host, peer_port, local_port);
 
     return socket;
+}
+
+void IceServer::updateAllocationExpireTime(const sockaddr_storage& peer_addr, uint32_t lifetime_sec) {
+    auto it = _allocations.find(peer_addr);
+    if (it != _allocations.end()) {
+        uint64_t new_expire_time = toolkit::getCurrentMillisecond() + (uint64_t)lifetime_sec * 1000;
+        it->second.expire_time = new_expire_time;
+    }
+}
+
+void IceServer::checkAllocationTimeout() {
+    uint64_t now = toolkit::getCurrentMillisecond();
+    int cleaned_allocation_count = 0;
+    int cleaned_permission_count = 0;
+    int cleaned_channel_count = 0;
+    
+    // 1. 清理过期的 allocations
+    for (auto it = _allocations.begin(); it != _allocations.end();) {
+        if (now >= it->second.expire_time) {
+            // allocation已过期，清理资源
+            auto peer_addr = it->first;
+            InfoL << "Allocation expired for " << addrToStr(peer_addr) 
+                  << ", releasing port " << (it->second.port ? *it->second.port : 0);
+            
+            // 从_relayed_pairs中移除
+            _relayed_pairs.erase(peer_addr);
+            
+            // 从_allocations中移除
+            it = _allocations.erase(it);
+            cleaned_allocation_count++;
+        } else {
+            ++it;
+        }
+    }
+    
+    // 2. 清理过期的 permissions（5分钟有效期）
+    for (auto it = _permissions.begin(); it != _permissions.end();) {
+        if (now - it->second > 5 * 60 * 1000) {
+            DebugL << "Permission expired for " << addrToStr(it->first);
+            it = _permissions.erase(it);
+            cleaned_permission_count++;
+        } else {
+            ++it;
+        }
+    }
+    
+    // 3. 清理过期的 channel bindings（10分钟有效期，RFC 5766规定）
+    for (auto it = _channel_binding_times.begin(); it != _channel_binding_times.end();) {
+        if (now - it->second > 10 * 60 * 1000) {
+            DebugL << "Channel binding expired for channel " << it->first;
+            _channel_bindings.erase(it->first);
+            it = _channel_binding_times.erase(it);
+            cleaned_channel_count++;
+        } else {
+            ++it;
+        }
+    }
+    
+    if (cleaned_allocation_count > 0) {
+        InfoL << "Cleaned " << cleaned_allocation_count << " expired allocations, "
+              << _allocations.size() << " allocations remaining";
+    }
+    if (cleaned_permission_count > 0) {
+        DebugL << "Cleaned " << cleaned_permission_count << " expired permissions, "
+               << _permissions.size() << " permissions remaining";
+    }
+    if (cleaned_channel_count > 0) {
+        DebugL << "Cleaned " << cleaned_channel_count << " expired channel bindings, "
+               << _channel_bindings.size() << " bindings remaining";
+    }
 }
 
 ////////////  IceAgent //////////////////////////

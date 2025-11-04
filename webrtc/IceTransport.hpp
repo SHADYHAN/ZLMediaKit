@@ -415,6 +415,7 @@ public:
     IceServer(Listener* listener, std::string ufrag, std::string password, toolkit::EventPoller::Ptr poller);
     virtual ~IceServer() {}
     
+    void initialize() override;
     bool processSocketData(const uint8_t* data, size_t len, const Pair::Ptr& pair) override;
     void relayForwordingData(const toolkit::Buffer::Ptr& buffer, const sockaddr_storage& peer_addr);
     void relayBackingData(const toolkit::Buffer::Ptr& buffer, const Pair::Ptr& pair, const sockaddr_storage& peer_addr);
@@ -437,10 +438,31 @@ protected:
     toolkit::SocketHelper::Ptr createRelayedUdpSocket(const std::string &peer_host, uint16_t peer_port, const std::string &local_ip, uint16_t local_port);
 
 protected:
+    // Allocation信息结构
+    struct AllocationInfo {
+        Pair::Ptr pair;
+        std::shared_ptr<uint16_t> port;
+        uint64_t expire_time;  // 过期时间戳（毫秒）
+        
+        AllocationInfo() = default;
+        AllocationInfo(Pair::Ptr p, std::shared_ptr<uint16_t> pt, uint64_t expire)
+            : pair(std::move(p)), port(std::move(pt)), expire_time(expire) {}
+    };
+
+    void updateAllocationExpireTime(const sockaddr_storage& peer_addr, uint32_t lifetime_sec);
+    void checkAllocationTimeout();
+
+protected:
     std::vector<toolkit::BufferLikeString> _nonce_list;
 
     std::unordered_map<sockaddr_storage /*peer ip:port*/, std::pair<std::shared_ptr<uint16_t> /* port */, Pair::Ptr /*relayed_pairs*/>,
         toolkit::SockUtil::SockAddrHash, toolkit::SockUtil::SockAddrEqual> _relayed_pairs;
+    
+    // Allocation管理：记录所有allocation的过期时间
+    std::unordered_map<sockaddr_storage /*peer ip:port*/, AllocationInfo,
+        toolkit::SockUtil::SockAddrHash, toolkit::SockUtil::SockAddrEqual> _allocations;
+    
+    toolkit::Timer::Ptr _allocation_timer;  // 定期检查allocation超时
     Pair::Ptr _session_pair;
 };
 
