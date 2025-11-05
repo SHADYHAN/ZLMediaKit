@@ -741,12 +741,18 @@ void IceServer::processRelayPacket(const Buffer::Ptr &buffer, const Pair::Ptr& p
     }
 
     // 自动续期：每次收到来自远程peer的数据，说明客户端还在使用，自动延长allocation
-    // 这对直播流非常重要，避免因客户端未发送Refresh导致allocation过期
+    // 使用频率限制，避免高频map操作导致性能问题
+    // 每30秒更新一次即可，而不是每个包都更新
     if (_session_pair) {
-        sockaddr_storage client_addr;
-        _session_pair->get_peer_addr(client_addr);
-        GET_CONFIG(uint32_t, lifetime, kAllocationLifetime);
-        updateAllocationExpireTime(client_addr, lifetime);
+        uint64_t now = toolkit::getCurrentMillisecond();
+        // 频率限制：30秒更新一次（配置的lifetime通常是300秒，30秒更新足够安全）
+        if (now - _last_allocation_update_time > 30000) {
+            sockaddr_storage client_addr;
+            _session_pair->get_peer_addr(client_addr);
+            GET_CONFIG(uint32_t, lifetime, kAllocationLifetime);
+            updateAllocationExpireTime(client_addr, lifetime);
+            _last_allocation_update_time = now;
+        }
     }
 
     auto forward_pair = std::make_shared<Pair>(_session_pair->_socket, pair->_socket->get_peer_ip(), pair->_socket->get_peer_port());

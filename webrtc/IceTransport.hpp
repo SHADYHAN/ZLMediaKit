@@ -464,6 +464,9 @@ protected:
     
     toolkit::Timer::Ptr _allocation_timer;  // 定期检查allocation超时
     Pair::Ptr _session_pair;
+    
+    // 自动续期频率限制：缓存上次更新时间，避免高频map操作导致性能问题
+    uint64_t _last_allocation_update_time = 0;
 };
 
 class IceAgent : public IceTransport {
