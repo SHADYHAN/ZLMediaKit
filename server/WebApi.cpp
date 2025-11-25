@@ -1095,6 +1095,14 @@ void installWebApi() {
                 continue;
             }
 
+            // 对于非 rtc 协议，仅保留当前仍在线的会话对应的记录
+            if (rec.schema != "rtc" && rec.protocol != "rtc") {
+                auto session = SessionMap::Instance().get(rec.id);
+                if (!session) {
+                    continue;
+                }
+            }
+
             // 仅返回当前还存在的流对应的观看记录
             if (!MediaSource::find(rec.vhost, rec.app, rec.stream)) {
                 continue;

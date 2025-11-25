@@ -12,6 +12,7 @@
 #include <deque>
 #include <mutex>
 #include <unordered_map>
+#include <algorithm>
 #include "Util/logger.h"
 #include "Util/onceToken.h"
 #include "Util/NoticeCenter.h"
@@ -341,7 +342,7 @@ static void *web_hook_tag = nullptr;
 
 static std::mutex s_watcher_mtx;
 static std::deque<WatcherRecord> s_watchers;
-static constexpr size_t kMaxWatchers = 1000;
+static constexpr size_t kMaxWatchers = 300;
 
 // cache: WebRTC signaling session_id -> real client ip
 static std::unordered_map<std::string, std::string> s_rtc_session_ip;
@@ -672,6 +673,19 @@ void installWebHook() {
     });
 
     NoticeCenter::Instance().addListener(&web_hook_tag, Broadcast::kBroadcastStreamNoneReader, [](BroadcastStreamNoneReaderArgs) {
+        // 该流已无任何观看者时，清理对应的 watcher 记录
+        {
+            std::lock_guard<std::mutex> lck(s_watcher_mtx);
+            auto tuple = sender.getMediaTuple();
+            s_watchers.erase(std::remove_if(s_watchers.begin(), s_watchers.end(),
+                                            [&tuple](const WatcherRecord &rec) {
+                                                return rec.vhost == tuple.vhost &&
+                                                       rec.app == tuple.app &&
+                                                       rec.stream == tuple.stream;
+                                            }),
+                             s_watchers.end());
+        }
+
         auto auto_close = false;
         auto muxer = sender.getMuxer();
         if (muxer && muxer->getOption().auto_close) {
