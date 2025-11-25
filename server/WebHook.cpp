@@ -358,7 +358,8 @@ static void recordWatcher(const MediaInfo &args, SockInfo &sender) {
     rec.app = args.app;
     rec.stream = args.stream;
     rec.params = args.params;
-    rec.start_stamp = getCurrentMillisecond();
+    // 使用系统时间戳（Unix 秒），与 MediaSource::getCreateStamp 的时间基准保持一致
+    rec.start_stamp = getCurrentMillisecond(true) / 1000;
 
     std::lock_guard<std::mutex> lck(s_watcher_mtx);
 

@@ -151,16 +151,19 @@ static std::string mappingCandidateTypeEnum2Str(CandidateInfo::AddressType type)
 }
 
 static CandidateInfo::AddressType mappingCandidateTypeStr2Enum(const std::string &type) {
-    if (strcasecmp(type.c_str(), "host") == 0) {
+    // 只解析第一个 token，避免例如 "host tcptype passive" 这种附加信息影响类型判断
+    auto pos = type.find(' ');
+    std::string base = (pos == std::string::npos) ? type : type.substr(0, pos);
+    if (strcasecmp(base.c_str(), "host") == 0) {
         return CandidateInfo::AddressType::HOST;
     }
-    if (strcasecmp(type.c_str(), "srflx") == 0) {
+    if (strcasecmp(base.c_str(), "srflx") == 0) {
         return CandidateInfo::AddressType::SRFLX;
     }
-    if (strcasecmp(type.c_str(), "prflx") == 0) {
+    if (strcasecmp(base.c_str(), "prflx") == 0) {
         return CandidateInfo::AddressType::PRFLX;
     }
-    if (strcasecmp(type.c_str(), "relay") == 0) {
+    if (strcasecmp(base.c_str(), "relay") == 0) {
         return CandidateInfo::AddressType::RELAY;
     }
     return CandidateInfo::AddressType::INVALID;
@@ -276,6 +279,8 @@ WebRtcTransport::WebRtcTransport(const EventPoller::Ptr &poller) {
 }
 
 void WebRtcTransport::onCreate() {
+    InfoL << "WebRtcTransport onCreate, id=" << _identifier << ", role=" << RoleStr(_role)
+          << ", signaling=" << SignalingProtocolsStr(_signaling_protocols);
     _dtls_transport = std::make_shared<RTC::DtlsTransport>(_poller, this);
     IceAgent::Role role = IceAgent::Role::Controlling;
     IceAgent::Implementation implementation = IceAgent::Implementation::Full;
@@ -295,6 +300,7 @@ void WebRtcTransport::onDestory() {
 #ifdef ENABLE_SCTP
     _sctp = nullptr;
 #endif
+    InfoL << "WebRtcTransport onDestory, id=" << _identifier;
     _dtls_transport = nullptr;
     _ice_agent = nullptr;
 }
@@ -599,7 +605,7 @@ void WebRtcTransport::setOnShutdown(function<void(const SockException &ex)> cb) 
 }
 
 void WebRtcTransport::onShutdown(const SockException &ex) {
-    TraceL << ex;
+    TraceL << "WebRtcTransport onShutdown, id=" << _identifier << ", ex=" << ex;
     if (_on_shutdown) {
         _on_shutdown(ex);
     }
