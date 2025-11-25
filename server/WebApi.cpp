@@ -76,6 +76,8 @@ using namespace Json;
 using namespace toolkit;
 using namespace mediakit;
 
+extern void getWatchers(std::vector<WatcherRecord> &out);
+
 namespace API {
 #define API_FIELD "api."
 const string kApiDebug = API_FIELD"apiDebug";
@@ -1063,6 +1065,55 @@ void installWebApi() {
             jsession["typeid"] = toolkit::demangle(typeid(*session).name());
             val["data"].append(jsession);
         });
+    });
+
+    api_regist("/index/api/getWatchers", [](API_ARGS_MAP) {
+        CHECK_SECRET();
+        std::vector<WatcherRecord> records;
+        getWatchers(records);
+
+        const std::string filter_schema = allArgs["schema"];
+        const std::string filter_vhost = allArgs["vhost"];
+        const std::string filter_app = allArgs["app"];
+        const std::string filter_stream = allArgs["stream"];
+        const std::string filter_ip = allArgs["ip"];
+
+        for (const auto &rec : records) {
+            if (!filter_schema.empty() && rec.schema != filter_schema) {
+                continue;
+            }
+            if (!filter_vhost.empty() && rec.vhost != filter_vhost) {
+                continue;
+            }
+            if (!filter_app.empty() && rec.app != filter_app) {
+                continue;
+            }
+            if (!filter_stream.empty() && rec.stream != filter_stream) {
+                continue;
+            }
+            if (!filter_ip.empty() && rec.ip != filter_ip) {
+                continue;
+            }
+
+            // 仅返回当前还存在的流对应的观看记录
+            if (!MediaSource::find(rec.vhost, rec.app, rec.stream)) {
+                continue;
+            }
+
+            Value item;
+            item["schema"] = rec.schema;
+            item[VHOST_KEY] = rec.vhost;
+            item["app"] = rec.app;
+            item["stream"] = rec.stream;
+            item["ip"] = rec.ip;
+            item["port"] = rec.port;
+            item["id"] = rec.id;
+            item["protocol"] = rec.protocol;
+            item["params"] = rec.params;
+            item["start_stamp"] = (Json::UInt64)rec.start_stamp;
+
+            val["data"].append(item);
+        }
     });
 
     // 断开tcp连接，比如说可以断开rtsp、rtmp播放器等  [AUTO-TRANSLATED:9147ffec]
@@ -2060,7 +2111,32 @@ void installWebApi() {
         CHECK(!offer.empty(), "http body(webrtc offer sdp) is empty");
 
         auto &session = static_cast<Session&>(sender);
-        auto args = std::make_shared<WebRtcArgsImp<std::string>>(allArgs, sender.getIdentifier());
+        auto session_id = sender.getIdentifier();
+
+        // Prefer real client ip from HTTP headers, then fall back to socket ip
+        std::string real_ip;
+        auto &parser = allArgs.parser;
+        auto &headers = parser.getHeader();
+
+        real_ip = headers["X-Real-IP"];
+        if (real_ip.empty()) {
+            auto xff = headers["X-Forwarded-For"];
+            if (!xff.empty()) {
+                auto pos = xff.find(',');
+                if (pos != std::string::npos) {
+                    real_ip = xff.substr(0, pos);
+                } else {
+                    real_ip = xff;
+                }
+            }
+        }
+        if (real_ip.empty()) {
+            real_ip = session.get_peer_ip();
+        }
+
+        auto args = std::make_shared<WebRtcArgsImp<std::string>>(allArgs, session_id);
+        // cache real client ip for rtc watcher mapping
+        setRtcSessionPeerIp(session_id, real_ip);
         WebRtcPluginManager::Instance().negotiateSdp(session, type, *args, [invoker, val, offer, headerOut](const WebRtcInterface &exchanger) mutable {
             auto &handler = const_cast<WebRtcInterface &>(exchanger);
             try {

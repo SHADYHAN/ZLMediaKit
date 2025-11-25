@@ -9,9 +9,13 @@
  */
 
 #include <sstream>
+#include <deque>
+#include <mutex>
+#include <unordered_map>
 #include "Util/logger.h"
 #include "Util/onceToken.h"
 #include "Util/NoticeCenter.h"
+#include "Util/TimeTicker.h"
 #include "Common/config.h"
 #include "Common/MediaSource.h"
 #include "Http/HttpSession.h"
@@ -335,6 +339,48 @@ static void pullStreamFromOrigin(const vector<string> &urls, size_t index, size_
 
 static void *web_hook_tag = nullptr;
 
+static std::mutex s_watcher_mtx;
+static std::deque<WatcherRecord> s_watchers;
+static constexpr size_t kMaxWatchers = 1000;
+
+// cache: WebRTC signaling session_id -> real client ip
+static std::unordered_map<std::string, std::string> s_rtc_session_ip;
+
+static void recordWatcher(const MediaInfo &args, SockInfo &sender) {
+    WatcherRecord rec;
+    rec.ip = sender.get_peer_ip();
+    rec.port = sender.get_peer_port();
+    rec.id = sender.getIdentifier();
+    rec.protocol = args.schema;
+    rec.schema = args.schema;
+    rec.vhost = args.vhost;
+    rec.app = args.app;
+    rec.stream = args.stream;
+    rec.params = args.params;
+    rec.start_stamp = getCurrentMillisecond();
+
+    std::lock_guard<std::mutex> lck(s_watcher_mtx);
+
+    // for WebRTC playback we have an http signaling session carrying the real
+    // client ip (affected by forwarded_ip_header). It passes a "session=xxx"
+    // param which we can use to map back to the signaling session.
+    if (rec.protocol == "rtc" || rec.schema == "rtc") {
+        auto kv = Parser::parseArgs(rec.params);
+        auto it = kv.find("session");
+        if (it != kv.end()) {
+            auto ip_it = s_rtc_session_ip.find(it->second);
+            if (ip_it != s_rtc_session_ip.end() && !ip_it->second.empty()) {
+                rec.ip = ip_it->second;
+            }
+        }
+    }
+
+    s_watchers.emplace_back(std::move(rec));
+    if (s_watchers.size() > kMaxWatchers) {
+        s_watchers.pop_front();
+    }
+}
+
 static mINI jsonToMini(const Value &obj) {
     mINI ret;
     if (obj.isObject()) {
@@ -387,6 +433,8 @@ void installWebHook() {
     });
 
     NoticeCenter::Instance().addListener(&web_hook_tag, Broadcast::kBroadcastMediaPlayed, [](BroadcastMediaPlayedArgs) {
+        recordWatcher(args, sender);
+
         GET_CONFIG(string, hook_play, Hook::kOnPlay);
         if (!hook_enable || hook_play.empty()) {
             invoker("");
@@ -795,4 +843,17 @@ void unInstallWebHook() {
 
 void onProcessExited() {
     reportServerExited();
+}
+
+void getWatchers(std::vector<WatcherRecord> &out) {
+    std::lock_guard<std::mutex> lck(s_watcher_mtx);
+    out.assign(s_watchers.begin(), s_watchers.end());
+}
+
+void setRtcSessionPeerIp(const std::string &session_id, const std::string &ip) {
+    if (session_id.empty() || ip.empty()) {
+        return;
+    }
+    std::lock_guard<std::mutex> lck(s_watcher_mtx);
+    s_rtc_session_ip[session_id] = ip;
 }

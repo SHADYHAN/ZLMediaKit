@@ -13,6 +13,7 @@
 
 #include <string>
 #include <functional>
+#include <vector>
 #include "json/json.h"
 
 // 支持json或urlencoded方式传输参数  [AUTO-TRANSLATED:0e14d484]
@@ -36,9 +37,9 @@ void unInstallWebHook();
 void onProcessExited();
 /**
  * 触发http hook请求
- * @param url 请求地址
- * @param body 请求body
- * @param func 回调
+ * @param func Callback
+ * @param func Callback
+ * @param func Callback
  * Trigger http hook request
  * @param url Request address
  * @param body Request body
@@ -48,4 +49,20 @@ void onProcessExited();
  * [AUTO-TRANSLATED:8ffdd09b]
  */
 void do_http_hook(const std::string &url, const ArgsType &body, const std::function<void(const Json::Value &, const std::string &)> &func = nullptr);
+
+struct WatcherRecord {
+    std::string ip;
+    uint16_t port;
+    std::string id;
+    std::string protocol;
+    std::string schema;
+    std::string vhost;
+    std::string app;
+    std::string stream;
+    std::string params;
+    uint64_t start_stamp;
+};
+
+void getWatchers(std::vector<WatcherRecord> &out);
+void setRtcSessionPeerIp(const std::string &session_id, const std::string &ip);
 #endif //ZLMEDIAKIT_WEBHOOK_H
