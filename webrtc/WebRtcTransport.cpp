@@ -845,14 +845,21 @@ void WebRtcTransportImp::OnDtlsTransportApplicationDataReceived(const RTC::DtlsT
 }
 
 WebRtcTransportImp::WebRtcTransportImp(const EventPoller::Ptr &poller) : WebRtcTransport(poller) {
-    InfoL << getIdentifier();
+    InfoL << "WebRtcTransportImp ctor, id=" << getIdentifier() << ", poller=" << getPoller().get();
 }
 
 WebRtcTransportImp::~WebRtcTransportImp() {
-    InfoL << getIdentifier();
+    InfoL << "WebRtcTransportImp dtor, id=" << getIdentifier() << ", poller=" << getPoller().get();
 }
 
 void WebRtcTransportImp::onDestory() {
+    auto video_loss = getLossRate(TrackVideo);
+    auto audio_loss = getLossRate(TrackAudio);
+    InfoL << "WebRtcTransportImp destroy, id=" << getIdentifier()
+          << ", duration=" << getDuration()
+          << ", bytes=" << getBytesUsage()
+          << ", video_loss=" << video_loss
+          << ", audio_loss=" << audio_loss;
     WebRtcTransport::onDestory();
     unregisterSelf();
 }
@@ -1438,6 +1445,11 @@ void WrappedRtxTrack::inputRtp(const char *buf, size_t len, uint64_t stamp_ms, R
 }
 
 void WebRtcTransportImp::onSendNack(MediaTrack &track, const FCI_NACK &nack, uint32_t ssrc) {
+    DebugL << "WebRTC send NACK, id=" << getIdentifier()
+           << ", media_type=" << (track.media ? track.media->type : -1)
+           << ", ssrc=" << ssrc
+           << ", pid=" << nack.getPid()
+           << ", blp=" << nack.getBlp();
     auto rtcp = RtcpFB::create(RTPFBType::RTCP_RTPFB_NACK, &nack, FCI_NACK::kSize);
     rtcp->ssrc = htonl(track.answer_ssrc_rtp);
     rtcp->ssrc_media = htonl(ssrc);

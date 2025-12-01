@@ -663,7 +663,7 @@ namespace RTC
 
         if (localRole == previousLocalRole)
         {
-            MS_ERROR("same local DTLS role provided, doing nothing");
+            MS_DEBUG_TAG(dtls, "same local DTLS role provided, doing nothing");
 
             return;
         }

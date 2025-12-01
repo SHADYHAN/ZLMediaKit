@@ -133,6 +133,19 @@ void WebRtcSession::onManager() {
         return;
     }
     if (_ticker.elapsedTime() > timeoutSec * 1000) {
+        bool transport_alive = (bool)_transport;
+        bool is_selected_session = false;
+        Session::Ptr active_session;
+        if (_transport) {
+            active_session = _transport->getSession();
+            if (active_session && active_session.get() == this) {
+                is_selected_session = true;
+            }
+        }
+        WarnP(this) << "webrtc manager timeout, transport_alive=" << transport_alive
+                    << ", is_selected_session=" << is_selected_session
+                    << ", elapsed=" << _ticker.elapsedTime()
+                    << ", created=" << _ticker.createdTime();
         shutdown(SockException(Err_timeout, "webrtc connection timeout"));
         return;
     }
