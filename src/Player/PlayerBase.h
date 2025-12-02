@@ -21,8 +21,21 @@
 #include "Common/MediaSink.h"
 #include "Extension/Frame.h"
 #include "Extension/Track.h"
+#include "Common/config.h"
+#include "Common/Parser.h"
 
 namespace mediakit {
+
+template <typename Type>
+void addCustomHeader(Type *c) {
+    auto &custom_header = (*c)[Client::kCustomHeader];
+    if (!custom_header.empty()) {
+        auto args = mediakit::Parser::parseArgs(custom_header);
+        for (auto &pr : args) {
+            c->addHeader(pr.first, pr.second);
+        }
+    }
+}
 
 class PlayerBase : public TrackSource, public toolkit::mINI {
 public:
@@ -167,8 +180,8 @@ public:
     virtual void setOnResume(const std::function<void()> &cb) = 0;
    
     virtual size_t getRecvSpeed() { return 0; }
-
     virtual size_t getRecvTotalBytes() { return 0; }
+    virtual std::shared_ptr<toolkit::SockInfo> getSockInfo() const { return nullptr; } 
 
 protected:
     virtual void onResume() = 0;
@@ -228,8 +241,11 @@ public:
         return _delegate ? _delegate->getTracks(ready) : Parent::getTracks(ready);
     }
 
-    std::shared_ptr<toolkit::SockInfo> getSockInfo() const {
-        return std::dynamic_pointer_cast<toolkit::SockInfo>(_delegate);
+    std::shared_ptr<toolkit::SockInfo> getSockInfo() const override {
+        auto ret = std::dynamic_pointer_cast<toolkit::SockInfo>(_delegate);
+        if (!ret)
+            ret = _delegate ? _delegate->getSockInfo() : Parent::getSockInfo();
+        return ret;
     }
 
     void setMediaSource(const MediaSource::Ptr &src) override {

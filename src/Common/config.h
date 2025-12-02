@@ -334,6 +334,12 @@ extern const std::string kRtspDemand;
 extern const std::string kRtmpDemand;
 extern const std::string kTSDemand;
 extern const std::string kFMP4Demand;
+// 音频转码配置
+// Audio transcoding configuration
+extern const std::string kEnableAudioTranscode;
+extern const std::string kAudioTranscodeBitrate;
+extern const std::string kAudioTranscodeSampleRate;
+extern const std::string kAudioTranscodeChannels;
 } // !Protocol
 
 // //////////HTTP配置///////////  [AUTO-TRANSLATED:a281d694]
@@ -577,6 +583,59 @@ extern const std::string kMergeFrame;
  
  * [AUTO-TRANSLATED:59086953]
  */
+// //////////转码配置///////////
+// //////////Transcode Configuration///////////
+namespace Transcode {
+#define TRANSCODE_FIELD "transcode."
+// 是否启用转码功能
+extern const std::string kEnable;
+// 最大并发转码任务数
+extern const std::string kMaxConcurrent;
+// 硬件加速类型 (none/nvidia/intel/amd/vaapi)
+extern const std::string kHwAccel;
+// 转码临时文件目录
+extern const std::string kTempDir;
+// 转码超时时间(秒)
+extern const std::string kTimeoutSec;
+// FFmpeg可执行文件路径
+extern const std::string kFFmpegBin;
+// 是否自动启动转码
+extern const std::string kAutoStart;
+} // namespace Transcode
+
+// 转码模板配置节名称
+static constexpr const char* kTranscodeTemplates = "transcode_templates";
+// 转码规则配置节名称  
+static constexpr const char* kTranscodeRules = "transcode_rules";
+
+// 转码相关配置
+namespace Transcode {
+// 是否启用转码
+extern const std::string kEnable;
+// 最大并发转码数
+extern const std::string kMaxConcurrent;
+// 硬件加速类型
+extern const std::string kHwAccel;
+// 临时文件目录
+extern const std::string kTempDir;
+// 转码超时时间(秒)
+extern const std::string kTimeoutSec;
+// FFmpeg二进制路径
+extern const std::string kFfmpegBin;
+// 是否自动启动转码
+extern const std::string kAutoStart;
+
+// 按需转码配置
+// 是否启用按需转码
+extern const std::string kOnDemandEnabled;
+// 无播放器后延迟停止时间(秒)
+extern const std::string kStopDelaySeconds;
+// 检查播放器间隔时间(秒)
+extern const std::string kCheckIntervalSeconds;
+// 是否仅在有播放器时启动转码
+extern const std::string kStartOnlyWithPlayer;
+} // namespace Transcode
+
 namespace Client {
 // 指定网卡ip  [AUTO-TRANSLATED:679fdccb]
 // Specify network card ip
@@ -630,6 +689,8 @@ extern const std::string kRtspSpeed;
 extern const std::string kLatency;
 // Set SRT PassPhrase
 extern const std::string kPassPhrase;
+// 自定义http头
+extern const std::string kCustomHeader;
 } // namespace Client
 } // namespace mediakit
 

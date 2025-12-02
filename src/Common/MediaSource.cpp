@@ -667,6 +667,14 @@ void MediaSourceEvent::onReaderChanged(MediaSource &sender, int size){
     bool is_mp4_vod = sender.getMediaTuple().app == record_app;
     weak_ptr<MediaSource> weak_sender = sender.shared_from_this();
 
+    EventPoller::Ptr specified_poller;
+    try {
+        specified_poller = this->getOwnerPoller(sender);
+    }
+    catch (std::exception &ex) {
+        // 尝试获取 OwnerPoller，没有实现则使用默认 nullptr
+        // WarnL << ex.what();
+    }
     _async_close_timer = std::make_shared<Timer>(stream_none_reader_delay / 1000.0f, [weak_sender, is_mp4_vod]() {
         auto strong_sender = weak_sender.lock();
         if (!strong_sender) {
@@ -682,25 +690,24 @@ void MediaSourceEvent::onReaderChanged(MediaSource &sender, int size){
         }
 
         if (!is_mp4_vod) {
+            // 直播时触发无人观看事件，让开发者自行选择是否关闭  [AUTO-TRANSLATED:c6c75eaa]
+            // When live streaming, trigger the no-viewer event, allowing developers to choose whether to close it.
+            NOTICE_EMIT(BroadcastStreamNoneReaderArgs, Broadcast::kBroadcastStreamNoneReader, *strong_sender);
             auto muxer = strong_sender->getMuxer();
             if (muxer && muxer->getOption().auto_close) {
                 // 此流被标记为无人观看自动关闭流  [AUTO-TRANSLATED:64a0dac3]
                 // This stream is marked as an automatically closed stream with no viewers.
-                WarnL << "Auto cloe stream when none reader: " << strong_sender->getUrl();
-                strong_sender->close(false);
-            } else {
-                // 直播时触发无人观看事件，让开发者自行选择是否关闭  [AUTO-TRANSLATED:c6c75eaa]
-                // When live streaming, trigger the no-viewer event, allowing developers to choose whether to close it.
-                NOTICE_EMIT(BroadcastStreamNoneReaderArgs, Broadcast::kBroadcastStreamNoneReader, *strong_sender);
+                WarnL << "Auto close stream when none reader: " << strong_sender->getUrl();
+                strong_sender->getOwnerPoller()->async([strong_sender]() { strong_sender->close(false); });
             }
         } else {
             // 这个是mp4点播，我们自动关闭  [AUTO-TRANSLATED:8a7b9a90]
             // This is an mp4 on-demand, we automatically close it.
             WarnL << "MP4点播无人观看,自动关闭:" << strong_sender->getUrl();
-            strong_sender->close(false);
+            strong_sender->getOwnerPoller()->async([strong_sender]() { strong_sender->close(false); });
         }
         return false;
-    }, nullptr);
+    }, specified_poller);
 }
 
 string MediaSourceEvent::getOriginUrl(MediaSource &sender) const {

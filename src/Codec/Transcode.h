@@ -34,6 +34,9 @@ extern "C" {
 #define FF_CODEC_VER_7_1 AV_VERSION_INT(61, 0, 0)
 
 namespace mediakit {
+// 辅助函数声明
+std::string ffmpeg_err(int errnum);
+std::unique_ptr<AVPacket, void (*)(AVPacket *)> alloc_av_packet();
 
 class FFmpegFrame {
 public:

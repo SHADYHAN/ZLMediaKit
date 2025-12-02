@@ -33,6 +33,7 @@ OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 #include "Util/SSLUtil.h"
 
 using namespace std;
+using namespace toolkit;
 
 #define LOG_OPENSSL_ERROR(desc)                                                                    \
     do                                                                                               \
@@ -650,6 +651,8 @@ namespace RTC
 
     void DtlsTransport::Run(Role localRole)
     {
+        DebugL << ((localRole == RTC::DtlsTransport::Role::SERVER)? "Server" : "Client");
+
         MS_TRACE();
 
         MS_ASSERT(
@@ -660,7 +663,7 @@ namespace RTC
 
         if (localRole == previousLocalRole)
         {
-            MS_ERROR("same local DTLS role provided, doing nothing");
+            MS_DEBUG_TAG(dtls, "same local DTLS role provided, doing nothing");
 
             return;
         }

@@ -137,6 +137,12 @@ const string kRtmpDemand = string(kFieldName) + "rtmp_demand";
 const string kTSDemand = string(kFieldName) + "ts_demand";
 const string kFMP4Demand = string(kFieldName) + "fmp4_demand";
 
+// 音频转码配置
+const string kEnableAudioTranscode = string(kFieldName) + "enable_audio_transcode";
+const string kAudioTranscodeBitrate = string(kFieldName) + "audio_transcode_bitrate";
+const string kAudioTranscodeSampleRate = string(kFieldName) + "audio_transcode_sample_rate";
+const string kAudioTranscodeChannels = string(kFieldName) + "audio_transcode_channels";
+
 static onceToken token([]() {
     mINI::Instance()[kModifyStamp] = (int)ProtocolOption::kModifyStampRelative;
     mINI::Instance()[kEnableAudio] = 1;
@@ -164,6 +170,12 @@ static onceToken token([]() {
     mINI::Instance()[kRtmpDemand] = 0;
     mINI::Instance()[kTSDemand] = 0;
     mINI::Instance()[kFMP4Demand] = 0;
+
+    // 音频转码默认配置
+    mINI::Instance()[kEnableAudioTranscode] = 0;        // 默认关闭
+    mINI::Instance()[kAudioTranscodeBitrate] = 64000;   // 64kbps
+    mINI::Instance()[kAudioTranscodeSampleRate] = 48000; // 48kHz
+    mINI::Instance()[kAudioTranscodeChannels] = 2;      // 立体声
 });
 } // !Protocol
 
@@ -383,6 +395,41 @@ static onceToken token([]() {
 });
 } // namespace RtpProxy
 
+// //////////转码配置///////////
+// //////////Transcode Configuration///////////
+namespace Transcode {
+#define TRANSCODE_FIELD "transcode."
+const string kEnable = TRANSCODE_FIELD "enable";
+const string kMaxConcurrent = TRANSCODE_FIELD "maxConcurrent";
+const string kHwAccel = TRANSCODE_FIELD "hwAccel";
+const string kTempDir = TRANSCODE_FIELD "tempDir";
+const string kTimeoutSec = TRANSCODE_FIELD "timeoutSec";
+const string kFFmpegBin = TRANSCODE_FIELD "ffmpegBin";
+const string kAutoStart = TRANSCODE_FIELD "autoStart";
+
+// 按需转码配置
+const string kOnDemandEnabled = TRANSCODE_FIELD "onDemandEnabled";
+const string kStopDelaySeconds = TRANSCODE_FIELD "stopDelaySeconds";
+const string kCheckIntervalSeconds = TRANSCODE_FIELD "checkIntervalSeconds";
+const string kStartOnlyWithPlayer = TRANSCODE_FIELD "startOnlyWithPlayer";
+
+static onceToken token([]() {
+    mINI::Instance()[kEnable] = 0;
+    mINI::Instance()[kMaxConcurrent] = 4;
+    mINI::Instance()[kHwAccel] = "none";
+    mINI::Instance()[kTempDir] = "./temp/transcode";
+    mINI::Instance()[kTimeoutSec] = 300;
+    mINI::Instance()[kFFmpegBin] = "ffmpeg";
+    mINI::Instance()[kAutoStart] = 1;
+    
+    // 按需转码默认配置
+    mINI::Instance()[kOnDemandEnabled] = 1;  // 启用按需转码
+    mINI::Instance()[kStopDelaySeconds] = 60;  // 1分钟后停止
+    mINI::Instance()[kCheckIntervalSeconds] = 10;  // 每10秒检查一次
+    mINI::Instance()[kStartOnlyWithPlayer] = 0;  // 还是自动启动，但无播放器时停止
+});
+} // namespace Transcode
+
 namespace Client {
 const string kNetAdapter = "net_adapter";
 const string kRtpType = "rtp_type";
@@ -400,6 +447,7 @@ const string kProxyUrl = "proxy_url";
 const string kRtspSpeed = "rtsp_speed";
 const string kLatency = "latency";
 const string kPassPhrase = "passPhrase";
+const string kCustomHeader = "custom_header";
 } // namespace Client
 
 } // namespace mediakit

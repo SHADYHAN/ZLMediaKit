@@ -12,28 +12,26 @@
 #include "Util/util.h"
 #include "Network/TcpServer.h"
 #include "Common/config.h"
-#include "IceServer.hpp"
+#include "IceTransport.hpp"
 #include "WebRtcTransport.h"
 
 using namespace std;
+using namespace toolkit;
 
 namespace mediakit {
 
 static string getUserName(const char *buf, size_t len) {
-    if (!RTC::StunPacket::IsStun((const uint8_t *) buf, len)) {
+    if (!RTC::StunPacket::isStun((const uint8_t *) buf, len)) {
         return "";
     }
-    std::unique_ptr<RTC::StunPacket> packet(RTC::StunPacket::Parse((const uint8_t *) buf, len));
+    auto packet = RTC::StunPacket::parse((const uint8_t *) buf, len);
     if (!packet) {
         return "";
     }
-    if (packet->GetClass() != RTC::StunPacket::Class::REQUEST ||
-        packet->GetMethod() != RTC::StunPacket::Method::BINDING) {
-        return "";
-    }
+
     // 收到binding request请求  [AUTO-TRANSLATED:eff4d773]
     // Received binding request
-    auto vec = split(packet->GetUsername(), ":");
+    auto vec = split(packet->getUsername(), ":");
     return vec[0];
 }
 
@@ -92,7 +90,8 @@ void WebRtcSession::onRecv_l(const char *data, size_t len) {
     }
     _ticker.resetTime();
     CHECK(_transport);
-    _transport->inputSockData((char *)data, len, this);
+    auto self = static_pointer_cast<WebRtcSession>(shared_from_this());
+    _transport->inputSockData(data, len, self);
 }
 
 void WebRtcSession::onRecv(const Buffer::Ptr &buffer) {
@@ -120,7 +119,7 @@ void WebRtcSession::onError(const SockException &err) {
     getPoller()->async([transport, self]() mutable {
         // 延时减引用，防止使用transport对象时，销毁对象  [AUTO-TRANSLATED:09dd6609]
         // Delay decrementing the reference count to prevent the object from being destroyed when using the transport object
-        transport->removeTuple(self.get());
+        transport->removePair(self.get());
         // 确保transport在Session对象前销毁，防止WebRtcTransport::onDestory()时获取不到Session对象  [AUTO-TRANSLATED:acd8bd77]
         // Ensure that the transport is destroyed before the Session object to prevent WebRtcTransport::onDestory() from not being able to get the Session object
         transport = nullptr;
@@ -134,6 +133,19 @@ void WebRtcSession::onManager() {
         return;
     }
     if (_ticker.elapsedTime() > timeoutSec * 1000) {
+        bool transport_alive = (bool)_transport;
+        bool is_selected_session = false;
+        Session::Ptr active_session;
+        if (_transport) {
+            active_session = _transport->getSession();
+            if (active_session && active_session.get() == this) {
+                is_selected_session = true;
+            }
+        }
+        WarnP(this) << "webrtc manager timeout, transport_alive=" << transport_alive
+                    << ", is_selected_session=" << is_selected_session
+                    << ", elapsed=" << _ticker.elapsedTime()
+                    << ", created=" << _ticker.createdTime();
         shutdown(SockException(Err_timeout, "webrtc connection timeout"));
         return;
     }
@@ -162,5 +174,3 @@ const char *WebRtcSession::onSearchPacketTail(const char *data, size_t len) {
 }
 
 }// namespace mediakit
-
-

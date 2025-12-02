@@ -34,6 +34,14 @@ if(NOT ENABLE_SRT)
     list(REMOVE_ITEM MediaKit_SRC_LIST ${SRT_SRC_LIST})
 endif()
 
+if(NOT ENABLE_TRANSCODE)
+    file(GLOB TRANSCODE_SRC_LIST
+        ${CMAKE_CURRENT_SOURCE_DIR}/Transcode/*.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/Transcode/*.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/Transcode/*.h)
+    list(REMOVE_ITEM MediaKit_SRC_LIST ${TRANSCODE_SRC_LIST})
+endif()
+
 if(USE_SOLUTION_FOLDERS AND (NOT GROUP_BY_EXPLORER))
   # 在 IDE 中对文件进行分组, 源文件和头文件分开
   set_file_group("${CMAKE_CURRENT_SOURCE_DIR}" ${MediaKit_SRC_LIST})

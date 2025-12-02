@@ -40,7 +40,8 @@ public:
      */
     void clear() {
         _started = false;
-        _ticker.resetTime();
+        _last_input_ticker.resetTime();
+        _last_output_ticker.resetTime();
         _pkt_sort_cache_map.clear();
     }
 
@@ -64,6 +65,7 @@ public:
      */
     void sortPacket(SEQ seq, T packet) {
         _latest_seq = seq;
+        _last_input_ticker.resetTime();  // 每次收包重置input ticker
         if (!_started) {
             // 记录第一个seq  [AUTO-TRANSLATED:410c831f]
             // Record the first seq
@@ -85,7 +87,7 @@ public:
             // 无回环风险, 缓存seq回退包  [AUTO-TRANSLATED:4200dd1b]
             // No loop risk, cache seq rollback packets
             _pkt_drop_cache_map.emplace(seq, std::move(packet));
-            if (_pkt_drop_cache_map.size() > _max_distance || _ticker.elapsedTime() > _max_buffer_ms) {
+            if (_pkt_drop_cache_map.size() > _max_distance || _last_input_ticker.elapsedTime() > _max_buffer_ms) {
                 // seq回退包太多，可能源端重置seq计数器，这部分数据需要输出  [AUTO-TRANSLATED:d31aead7]
                 // Too many seq rollback packets, the source may reset the seq counter, this part of data needs to be output
                 forceFlush(_next_seq);
@@ -131,7 +133,9 @@ private:
     }
 
     bool needForceFlush(SEQ seq) {
-        return _pkt_sort_cache_map.size() > _max_buffer_size || distance(seq) > _max_distance || _ticker.elapsedTime() > _max_buffer_ms;
+        // 使用input ticker而不是output ticker来判断缓存超时  [AUTO-TRANSLATED:fix-jitter-bug]
+        // Use input ticker instead of output ticker to determine cache timeout
+        return _pkt_sort_cache_map.size() > _max_buffer_size || distance(seq) > _max_distance || _last_input_ticker.elapsedTime() > _max_buffer_ms;
     }
 
     void forceFlush(SEQ next_seq) {
@@ -203,11 +207,11 @@ private:
             WarnL << "packet dropped: " << _next_seq << " -> " << static_cast<SEQ>(seq - 1)
                   << ", latest seq: " << _latest_seq
                   << ", jitter buffer size: " << _pkt_sort_cache_map.size()
-                  << ", jitter buffer ms: " << _ticker.elapsedTime();
+                  << ", jitter buffer ms: " << _last_output_ticker.elapsedTime();
         }
         _next_seq = static_cast<SEQ>(seq + 1);
         _cb(seq, std::move(packet));
-        _ticker.resetTime();
+        _last_output_ticker.resetTime();  // output时重置output ticker
     }
 
 private:
@@ -221,9 +225,12 @@ private:
     // seq最大跳跃距离  [AUTO-TRANSLATED:bb663e41]
     // Maximum seq jump distance
     size_t _max_distance = 256;
-    // 记录上次output至今的时间  [AUTO-TRANSLATED:83e53e42]
-    // Record the time since the last output
-    toolkit::Ticker _ticker;
+    // 记录上次input至今的时间（用于判断缓存超时）  [AUTO-TRANSLATED:fix-jitter-bug]
+    // Record the time since the last input (for cache timeout)
+    toolkit::Ticker _last_input_ticker;
+    // 记录上次output至今的时间（用于日志统计）  [AUTO-TRANSLATED:fix-jitter-bug]
+    // Record the time since the last output (for logging)
+    toolkit::Ticker _last_output_ticker;
     // 最近输入的seq  [AUTO-TRANSLATED:24ca96ee]
     // The most recently input seq
     SEQ _latest_seq = 0;

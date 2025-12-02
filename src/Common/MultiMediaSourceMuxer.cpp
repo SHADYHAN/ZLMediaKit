@@ -11,6 +11,7 @@
 #include <math.h>
 #include "Common/config.h"
 #include "MultiMediaSourceMuxer.h"
+#include "Thread/WorkThreadPool.h"
 
 using namespace std;
 using namespace toolkit;
@@ -176,7 +177,7 @@ static string getTrackInfoStr(const TrackSource *track_src){
                 break;
         }
     }
-    return std::move(codec_info);
+    return codec_info;
 }
 
 const ProtocolOption &MultiMediaSourceMuxer::getOption() const {
@@ -194,7 +195,7 @@ std::string MultiMediaSourceMuxer::shortUrl() const {
     }
     return _tuple.shortUrl();
 }
-
+#if defined(ENABLE_RTPPROXY)
 void MultiMediaSourceMuxer::forEachRtpSender(const std::function<void(const std::string &ssrc, const RtpSender &sender)> &cb) const {
     for (auto &pr : _rtp_sender) {
         auto sender = std::get<1>(pr.second).lock();
@@ -203,7 +204,7 @@ void MultiMediaSourceMuxer::forEachRtpSender(const std::function<void(const std:
         }
     }
 }
-
+#endif // ENABLE_RTPPROXY
 MultiMediaSourceMuxer::MultiMediaSourceMuxer(const MediaTuple& tuple, float dur_sec, const ProtocolOption &option): _tuple(tuple) {
     if (!option.stream_replace.empty()) {
         // 支持在on_publish hook中替换stream_id  [AUTO-TRANSLATED:375eb2ff]
@@ -242,6 +243,16 @@ MultiMediaSourceMuxer::MultiMediaSourceMuxer(const MediaTuple& tuple, float dur_
     // Audio related settings
     enableAudio(option.enable_audio);
     enableMuteAudio(option.add_mute_audio);
+
+#if defined(ENABLE_FFMPEG)
+    // 读取音频转码配置
+    GET_CONFIG(int, enable_transcode, Protocol::kEnableAudioTranscode);
+    _enable_audio_transcode = enable_transcode;
+    
+    if (_enable_audio_transcode) {
+        InfoL << "Audio transcoding enabled for: " << shortUrl();
+    }
+#endif
 }
 
 void MultiMediaSourceMuxer::setMediaListener(const std::weak_ptr<MediaSourceEvent> &listener) {
@@ -400,6 +411,88 @@ bool MultiMediaSourceMuxer::setupRecord(MediaSource &sender, Recorder::type type
     }
 }
 
+std::string MultiMediaSourceMuxer::startRecord(const std::string &file_path, uint32_t back_time_ms, uint32_t forward_time_ms) {
+#if !defined(ENABLE_MP4)
+    throw std::invalid_argument("mp4相关功能未打开，请开启ENABLE_MP4宏后编译再测试");
+#else
+    if (!_ring) {
+        throw std::runtime_error("frame gop cache disabled, start record event video failed");
+    }
+    auto path = Recorder::getRecordPath(Recorder::type_mp4, _tuple, _option.mp4_save_path);
+    path += file_path;
+    TraceL << "mp4 save path: " << path;
+
+    auto muxer = std::make_shared<MP4Muxer>();
+    muxer->openMP4(path);
+    for (auto &track : MediaSink::getTracks()) {
+        muxer->addTrack(track);
+    }
+    muxer->addTrackCompleted();
+
+    std::list<Frame::Ptr> history;
+    _ring->flushGop([&](const Frame::Ptr &frame) { history.emplace_back(frame); });
+    if (!history.empty()) {
+        auto now_dts = history.back()->dts();
+
+        decltype(history)::iterator pos = history.end();
+        for (auto it = history.rbegin(); it != history.rend(); ++it) {
+            auto &frame = *it;
+            if (frame->getTrackType() != TrackVideo || (!frame->configFrame() && !frame->keyFrame())) {
+                continue;
+            }
+            // 如果视频关键帧到末尾的时长超过一定的时间，那前面的数据应该全部删除
+            if (frame->dts() + back_time_ms < now_dts) {
+                pos = it.base();
+                --pos;
+                break;
+            }
+        }
+        if (pos != history.end()) {
+            // 移除前面过多的数据
+            TraceL << "clear history video: " << history.front()->dts() << " -> " << (*pos)->dts();
+            history.erase(history.begin(), pos);
+        }
+        if (!history.empty()) {
+            auto &front = history.front();
+            InfoL << "start record: " << path
+                  << ", start_dts: " << front->dts() << ", key_frame: " << front->keyFrame() << ", config_frame: " << front->configFrame()
+                  << ", now_dts: " << now_dts;
+        }
+
+        for (auto &frame : history) {
+            muxer->inputFrame(frame);
+        }
+    }
+
+    auto reader = _ring->attach(MultiMediaSourceMuxer::getOwnerPoller(MediaSource::NullMediaSource()), false);
+    uint64_t now_dts = 0;
+    int selected_index = -1;
+    reader->setReadCB([muxer, now_dts, selected_index, forward_time_ms, reader, path](const Frame::Ptr &frame) mutable {
+        // 循环引用自身
+        if (!now_dts) {
+            now_dts = frame->dts();
+            selected_index = frame->getIndex();
+        }
+        if (frame->getIndex() == selected_index && now_dts + forward_time_ms < frame->dts()) {
+            InfoL << "stop record: " << path << ", end dts: " << frame->dts();
+            WorkThreadPool::Instance().getPoller()->async([muxer]() { muxer->closeMP4(); });
+            reader = nullptr;
+            return;
+        }
+        muxer->inputFrame(frame);
+    });
+    std::weak_ptr<RingType::RingReader> weak_reader = reader;
+    reader->setDetachCB([weak_reader]() {
+        if (auto strong_reader = weak_reader.lock()) {
+            // 防止循环引用
+            strong_reader->setReadCB(nullptr);
+        }
+    });
+
+    return path;
+#endif
+}
+
 // 此函数可能跨线程调用  [AUTO-TRANSLATED:e8c5f74d]
 // This function may be called across threads
 bool MultiMediaSourceMuxer::isRecording(MediaSource &sender, Recorder::type type) {
@@ -522,7 +615,9 @@ bool MultiMediaSourceMuxer::close(MediaSource &sender) {
     _mp4 = nullptr;
     _hls = nullptr;
     _hls_fmp4 = nullptr;
+#if defined(ENABLE_RTPPROXY)
     _rtp_sender.clear();
+#endif // ENABLE_RTPPROXY
     return true;
 }
 
@@ -538,13 +633,40 @@ bool MultiMediaSourceMuxer::onTrackReady(const Track::Ptr &track) {
         stamp.setPlayBack();
     }
 
+#if defined(ENABLE_FFMPEG)
+    // 如果启用了音频转码，且是 AAC 音频轨道
+    if (_enable_audio_transcode && 
+        track->getTrackType() == TrackAudio && 
+        track->getCodecId() == CodecAAC) {
+        try {
+            createAudioTranscoder(track);
+            // 转码成功后，RTSP 将使用 Opus，所以这里不添加 AAC track 到 RTSP
+            InfoL << "Audio transcoding enabled, RTSP will use Opus instead of AAC";
+        } catch (std::exception &ex) {
+            WarnL << "Failed to create audio transcoder: " << ex.what();
+            _enable_audio_transcode = false;
+        }
+    }
+#endif
+
     bool ret = false;
     if (_rtmp) {
         ret = _rtmp->addTrack(track) ? true : ret;
     }
+    
+    // 如果启用了音频转码且是 AAC，不要将 AAC 添加到 RTSP（因为会用 Opus）
+#if defined(ENABLE_FFMPEG)
+    bool skip_rtsp_aac = _enable_audio_transcode && 
+                         track->getTrackType() == TrackAudio && 
+                         track->getCodecId() == CodecAAC;
+    if (_rtsp && !skip_rtsp_aac) {
+        ret = _rtsp->addTrack(track) ? true : ret;
+    }
+#else
     if (_rtsp) {
         ret = _rtsp->addTrack(track) ? true : ret;
     }
+#endif
     if (_ts) {
         ret = _ts->addTrack(track) ? true : ret;
     }
@@ -677,13 +799,34 @@ bool MultiMediaSourceMuxer::onTrackFrame(const Frame::Ptr &frame_in) {
 
 bool MultiMediaSourceMuxer::onTrackFrame_l(const Frame::Ptr &frame_in) {
     auto frame = frame_in;
+    
+#if defined(ENABLE_FFMPEG)
+    // 音频转码处理：输入原始 AAC 帧到转码器
+    if (_audio_transcoder && 
+        frame->getTrackType() == TrackAudio && 
+        frame->getCodecId() == CodecAAC) {
+        _audio_transcoder->inputFrame(frame);
+    }
+#endif
+    
     bool ret = false;
     if (_rtmp) {
         ret = _rtmp->inputFrame(frame) ? true : ret;
     }
+    
+    // 如果启用了音频转码且是 AAC 帧，不要将 AAC 发送到 RTSP（因为会用 Opus）
+#if defined(ENABLE_FFMPEG)
+    bool skip_rtsp_aac = _audio_transcoder && 
+                         frame->getTrackType() == TrackAudio && 
+                         frame->getCodecId() == CodecAAC;
+    if (_rtsp && !skip_rtsp_aac) {
+        ret = _rtsp->inputFrame(frame) ? true : ret;
+    }
+#else
     if (_rtsp) {
         ret = _rtsp->inputFrame(frame) ? true : ret;
     }
+#endif
     if (_ts) {
         ret = _ts->inputFrame(frame) ? true : ret;
     }
@@ -747,5 +890,43 @@ bool MultiMediaSourceMuxer::isEnabled(){
     }
     return _is_enable;
 }
+
+#if defined(ENABLE_FFMPEG)
+void MultiMediaSourceMuxer::createAudioTranscoder(const Track::Ptr &track) {
+    // 读取转码参数
+    GET_CONFIG(int, bitrate, Protocol::kAudioTranscodeBitrate);
+    GET_CONFIG(int, sample_rate, Protocol::kAudioTranscodeSampleRate);
+    GET_CONFIG(int, channels, Protocol::kAudioTranscodeChannels);
+    
+    InfoL << "Creating AudioTranscoder for: " << shortUrl()
+          << ", AAC → Opus, " << sample_rate << "Hz, " 
+          << channels << "ch, " << bitrate << "bps";
+    
+    // 创建转码器
+    _audio_transcoder = std::make_shared<AudioTranscoder>(
+        track, sample_rate, channels, bitrate
+    );
+    
+    // 获取转码后的 Opus Track
+    _transcoded_audio_track = _audio_transcoder->getOutputTrack();
+    
+    // 将转码后的 Opus Track 添加到各个 Muxer
+    // 注意：只添加到需要 Opus 的协议（主要是 WebRTC）
+    if (_rtsp && _transcoded_audio_track) {
+        // RTSP 也支持 Opus，添加转码后的 track
+        _rtsp->addTrack(_transcoded_audio_track);
+    }
+    
+    // 设置转码输出回调：将 Opus 帧分发到各个 Muxer
+    _audio_transcoder->setOnOutput([this](const Frame::Ptr &opus_frame) {
+        // 将 Opus 帧输出到 RTSP（用于 WebRTC）
+        if (_rtsp) {
+            _rtsp->inputFrame(opus_frame);
+        }
+    });
+    
+    InfoL << "AudioTranscoder created successfully for: " << shortUrl();
+}
+#endif
 
 }//namespace mediakit

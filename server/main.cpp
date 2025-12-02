@@ -37,6 +37,10 @@
 #include "../srt/SrtTransport.hpp"
 #endif
 
+#if defined(ENABLE_TRANSCODE)
+#include "../src/Transcode/TranscodeManager.h"
+#endif
+
 #if defined(ENABLE_VERSION)
 #include "ZLMVersion.h"
 #endif
@@ -396,6 +400,15 @@ int start_main(int argc,char *argv[]) {
         installWebHook();
         InfoL << "已启动http hook 接口";
 
+#if defined(ENABLE_TRANSCODE)
+        // 启动转码管理器
+        if (TranscodeManager::Instance().start()) {
+            InfoL << "已启动转码管理器";
+        } else {
+            WarnL << "转码管理器启动失败";
+        }
+#endif
+
         try {
             // rtsp服务器，端口默认554  [AUTO-TRANSLATED:07937d81]
             // rtsp server, default port 554
@@ -462,12 +475,18 @@ int start_main(int argc,char *argv[]) {
         signal(SIGINT, [](int) {
             InfoL << "SIGINT:exit";
             signal(SIGINT, SIG_IGN); // 设置退出信号
+            // 恢复终端状态
+            system("stty echo 2>/dev/null");
+            system("stty icanon 2>/dev/null");
             sem.post();
         }); // 设置退出信号
 
         signal(SIGTERM,[](int) {
             WarnL << "SIGTERM:exit";
             signal(SIGTERM, SIG_IGN);
+            // 恢复终端状态
+            system("stty echo 2>/dev/null");
+            system("stty icanon 2>/dev/null");
             sem.post();
         });
 

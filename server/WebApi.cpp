@@ -67,6 +67,11 @@
 #include "VideoStack.h"
 #endif
 
+#if defined(ENABLE_TRANSCODE)
+#include "../src/Transcode/TranscodeManager.h"
+#include "../src/Transcode/TranscodeConfig.h"
+#endif
+
 using namespace std;
 using namespace Json;
 using namespace toolkit;
@@ -313,73 +318,6 @@ static inline void addHttpListener(){
         },false);
     });
 }
-
-template <typename Type>
-class ServiceController {
-public:
-    using Pointer = std::shared_ptr<Type>;
-    std::unordered_map<std::string, Pointer> _map;
-    mutable std::recursive_mutex _mtx;
-
-    void clear() {
-        decltype(_map) copy;
-        {
-            std::lock_guard<std::recursive_mutex> lck(_mtx);
-            copy.swap(_map);
-        }
-    }
-
-    size_t erase(const std::string &key) {
-        std::lock_guard<std::recursive_mutex> lck(_mtx);
-        return _map.erase(key);
-    }
-
-    size_t size() { 
-        std::lock_guard<std::recursive_mutex> lck(_mtx);
-        return _map.size();
-    }
-
-    Pointer find(const std::string &key) const {
-        std::lock_guard<std::recursive_mutex> lck(_mtx);
-        auto it = _map.find(key);
-        if (it == _map.end()) {
-            return nullptr;
-        }
-        return it->second;
-    }
-
-    void for_each(const std::function<void(const std::string&, const Pointer&)>& cb) {
-        std::lock_guard<std::recursive_mutex> lck(_mtx);
-        auto it = _map.begin();
-        while (it != _map.end()) {
-            cb(it->first, it->second);
-            it++;
-        }
-    }
-
-    template<class ..._Args>
-    Pointer make(const std::string &key, _Args&& ...__args) {
-        // assert(!find(key));
-
-        auto server = std::make_shared<Type>(std::forward<_Args>(__args)...);
-        std::lock_guard<std::recursive_mutex> lck(_mtx);
-        auto it = _map.emplace(key, server);
-        assert(it.second);
-        return server;
-    }
-
-    template<class ..._Args>
-    Pointer makeWithAction(const std::string &key, function<void(Pointer)> action, _Args&& ...__args) {
-        // assert(!find(key));
-
-        auto server = std::make_shared<Type>(std::forward<_Args>(__args)...);
-        action(server);
-        std::lock_guard<std::recursive_mutex> lck(_mtx);
-        auto it = _map.emplace(key, server);
-        assert(it.second);
-        return server;
-    }
-};
 
 // 拉流代理器列表  [AUTO-TRANSLATED:6dcfb11f]
 // Pull stream proxy list
@@ -1728,7 +1666,7 @@ void installWebApi() {
         auto src = MediaSource::find(vhost, app, allArgs["stream_id"]);
         auto process = src ? src->getRtpProcess() : nullptr;
         if (process) {
-            process->setStopCheckRtp(true);
+            process->pauseRtpTimeout(true, allArgs["pause_seconds"]);
         } else {
             val["code"] = API::NotFound;
         }
@@ -1748,7 +1686,7 @@ void installWebApi() {
         auto src = MediaSource::find(vhost, app, allArgs["stream_id"]);
         auto process = src ? src->getRtpProcess() : nullptr;
         if (process) {
-            process->setStopCheckRtp(false);
+            process->pauseRtpTimeout(false);
         } else {
             val["code"] = API::NotFound;
         }
@@ -2314,6 +2252,254 @@ void installWebApi() {
         auto ret = VideoStackManager::Instance().stopVideoStack(allArgs["id"]);
         val["code"] = ret;
         val["msg"] = ret ? "failed" : "success";
+        invoker(200, headerOut, val.toStyledString());
+    });
+#endif
+
+#if defined(ENABLE_TRANSCODE)
+    // 启动转码
+    // 测试url http://127.0.0.1/index/api/startTranscode?vhost=__defaultVhost__&app=live&stream=test&templates=720p,480p
+    api_regist("/index/api/startTranscode", [](API_ARGS_MAP_ASYNC) {
+        CHECK_SECRET();
+        CHECK_ARGS("app", "stream");
+        
+        auto vhost = allArgs["vhost"];
+        auto app = allArgs["app"];  
+        auto stream = allArgs["stream"];
+        auto templates = allArgs["templates"];
+        auto input_url = allArgs["input_url"];
+        
+        // 解析模板列表
+        vector<string> template_list;
+        if (!templates.empty()) {
+            stringstream ss(templates);
+            string template_name;
+            while (getline(ss, template_name, ',')) {
+                // 去除前后空格
+                template_name.erase(0, template_name.find_first_not_of(" \t"));
+                template_name.erase(template_name.find_last_not_of(" \t") + 1);
+                if (!template_name.empty()) {
+                    template_list.push_back(template_name);
+                }
+            }
+        }
+        
+        bool success = TranscodeManager::Instance().startTranscode(app, stream, template_list, input_url);
+        
+        val["code"] = success ? API::Success : API::OtherFailed;
+        val["msg"] = success ? "success" : "failed to start transcode";
+        if (success) {
+            auto task = TranscodeManager::Instance().getTask(app, stream);
+            val["task_id"] = task.task_id;
+            val["templates"] = Json::Value(Json::arrayValue);
+            for (const auto &tmpl : task.templates) {
+                val["templates"].append(tmpl);
+            }
+        }
+        
+        invoker(200, headerOut, val.toStyledString());
+    });
+    
+    // 停止转码
+    // 测试url http://127.0.0.1/index/api/stopTranscode?vhost=__defaultVhost__&app=live&stream=test
+    api_regist("/index/api/stopTranscode", [](API_ARGS_MAP_ASYNC) {
+        CHECK_SECRET();
+        
+        auto app = allArgs["app"];
+        auto stream = allArgs["stream"];
+        auto task_id = allArgs["task_id"];
+        
+        bool success = false;
+        if (!task_id.empty()) {
+            success = TranscodeManager::Instance().stopTranscode(task_id);
+        } else if (!app.empty() && !stream.empty()) {
+            success = TranscodeManager::Instance().stopTranscode(app, stream);
+        }
+        
+        val["code"] = success ? API::Success : API::OtherFailed;
+        val["msg"] = success ? "success" : "failed to stop transcode";
+        
+        invoker(200, headerOut, val.toStyledString());
+    });
+    
+    // 获取转码任务列表
+    // 测试url http://127.0.0.1/index/api/getTranscodeList
+    api_regist("/index/api/getTranscodeList", [](API_ARGS_MAP_ASYNC) {
+        CHECK_SECRET();
+        
+        auto tasks = TranscodeManager::Instance().getAllTasks();
+        
+        val["code"] = API::Success;
+        val["data"] = Json::Value(Json::arrayValue);
+        
+        for (const auto &task : tasks) {
+            Json::Value task_obj;
+            task_obj["task_id"] = task.task_id;
+            task_obj["app"] = task.app;
+            task_obj["stream"] = task.stream;
+            task_obj["input_url"] = task.input_url;
+            task_obj["create_time"] = (Json::UInt64)task.create_time;
+            task_obj["auto_started"] = task.auto_started;
+            task_obj["total_sessions"] = task.total_sessions;
+            task_obj["running_sessions"] = task.running_sessions;
+            task_obj["error_sessions"] = task.error_sessions;
+            
+            task_obj["templates"] = Json::Value(Json::arrayValue);
+            for (const auto &tmpl : task.templates) {
+                task_obj["templates"].append(tmpl);
+            }
+            
+            val["data"].append(task_obj);
+        }
+        
+        invoker(200, headerOut, val.toStyledString());
+    });
+    
+    // 获取转码任务详情
+    // 测试url http://127.0.0.1/index/api/getTranscodeInfo?app=live&stream=test
+    api_regist("/index/api/getTranscodeInfo", [](API_ARGS_MAP_ASYNC) {
+        CHECK_SECRET();
+        
+        auto app = allArgs["app"];
+        auto stream = allArgs["stream"];
+        auto task_id = allArgs["task_id"];
+        
+        TranscodeTaskInfo task;
+        if (!task_id.empty()) {
+            task = TranscodeManager::Instance().getTask(task_id);
+        } else if (!app.empty() && !stream.empty()) {
+            task = TranscodeManager::Instance().getTask(app, stream);
+        }
+        
+        if (task.task_id.empty()) {
+            val["code"] = API::NotFound;
+            val["msg"] = "transcode task not found";
+        } else {
+            val["code"] = API::Success;
+            val["data"]["task_id"] = task.task_id;
+            val["data"]["app"] = task.app;
+            val["data"]["stream"] = task.stream;
+            val["data"]["input_url"] = task.input_url;
+            val["data"]["create_time"] = (Json::UInt64)task.create_time;
+            val["data"]["auto_started"] = task.auto_started;
+            val["data"]["total_sessions"] = task.total_sessions;
+            val["data"]["running_sessions"] = task.running_sessions;
+            val["data"]["error_sessions"] = task.error_sessions;
+            
+            val["data"]["templates"] = Json::Value(Json::arrayValue);
+            for (const auto &tmpl : task.templates) {
+                val["data"]["templates"].append(tmpl);
+            }
+            
+            // 获取会话详情
+            val["data"]["sessions"] = Json::Value(Json::arrayValue);
+            for (const auto &session : task.sessions) {
+                if (session) {
+                    auto info = session->getInfo();
+                    Json::Value session_obj;
+                    session_obj["template_name"] = info.template_name;
+                    session_obj["input_url"] = info.input_url;
+                    session_obj["output_url"] = info.output_url;
+                    session_obj["state"] = (int)info.state;
+                    session_obj["error_msg"] = info.error_msg;
+                    session_obj["start_time"] = (Json::UInt64)info.start_time;
+                    session_obj["bytes_in"] = (Json::UInt64)info.bytes_in;
+                    session_obj["bytes_out"] = (Json::UInt64)info.bytes_out;
+                    session_obj["frames_in"] = info.frames_in;
+                    session_obj["frames_out"] = info.frames_out;
+                    session_obj["fps"] = info.fps;
+                    session_obj["bitrate"] = info.bitrate;
+                    
+                    val["data"]["sessions"].append(session_obj);
+                }
+            }
+        }
+        
+        invoker(200, headerOut, val.toStyledString());
+    });
+    
+    // 获取转码统计信息
+    // 测试url http://127.0.0.1/index/api/getTranscodeStats
+    api_regist("/index/api/getTranscodeStats", [](API_ARGS_MAP_ASYNC) {
+        CHECK_SECRET();
+        
+        val["code"] = API::Success;
+        val["data"]["running_tasks"] = TranscodeManager::Instance().getRunningTaskCount();
+        val["data"]["total_tasks"] = TranscodeManager::Instance().getTotalTaskCount();
+        val["data"]["enabled"] = TranscodeConfig::Instance().isEnabled();
+        val["data"]["max_concurrent"] = TranscodeConfig::Instance().maxConcurrent();
+        val["data"]["hw_accel"] = (int)TranscodeConfig::Instance().hwAccelType();
+        
+        // 获取运行中的会话统计
+        auto sessions = TranscodeManager::Instance().getRunningSessionsInfo();
+        val["data"]["running_sessions"] = (int)sessions.size();
+        
+        val["data"]["sessions"] = Json::Value(Json::arrayValue);
+        for (const auto &info : sessions) {
+            Json::Value session_obj;
+            session_obj["app"] = info.app;
+            session_obj["stream"] = info.stream;
+            session_obj["template_name"] = info.template_name;
+            session_obj["fps"] = info.fps;
+            session_obj["bitrate"] = info.bitrate;
+            session_obj["frames_out"] = info.frames_out;
+            
+            val["data"]["sessions"].append(session_obj);
+        }
+        
+        invoker(200, headerOut, val.toStyledString());
+    });
+    
+    // 获取转码模板列表
+    // 测试url http://127.0.0.1/index/api/getTranscodeTemplates
+    api_regist("/index/api/getTranscodeTemplates", [](API_ARGS_MAP_ASYNC) {
+        CHECK_SECRET();
+        
+        auto template_names = TranscodeConfig::Instance().getAllTemplateNames();
+        
+        val["code"] = API::Success;
+        val["data"] = Json::Value(Json::arrayValue);
+        
+        for (const auto &name : template_names) {
+            auto tmpl = TranscodeConfig::Instance().getTemplate(name);
+            if (tmpl) {
+                Json::Value tmpl_obj;
+                tmpl_obj["name"] = tmpl->name;
+                tmpl_obj["video_codec"] = tmpl->video_codec;
+                tmpl_obj["audio_codec"] = tmpl->audio_codec;
+                tmpl_obj["video_bitrate"] = tmpl->video_bitrate;
+                tmpl_obj["audio_bitrate"] = tmpl->audio_bitrate;
+                tmpl_obj["width"] = tmpl->width;
+                tmpl_obj["height"] = tmpl->height;
+                tmpl_obj["fps"] = tmpl->fps;
+                tmpl_obj["ffmpeg_params"] = tmpl->getFFmpegParams();
+                
+                val["data"].append(tmpl_obj);
+            }
+        }
+        
+        invoker(200, headerOut, val.toStyledString());
+    });
+    
+    // 停止所有转码任务
+    // 测试url http://127.0.0.1/index/api/stopAllTranscode
+    api_regist("/index/api/stopAllTranscode", [](API_ARGS_MAP_ASYNC) {
+        CHECK_SECRET();
+        
+        auto tasks = TranscodeManager::Instance().getAllTasks();
+        int stopped_count = 0;
+        
+        for (const auto &task : tasks) {
+            if (TranscodeManager::Instance().stopTranscode(task.task_id)) {
+                stopped_count++;
+            }
+        }
+        
+        val["code"] = API::Success;
+        val["msg"] = "success";
+        val["stopped_count"] = stopped_count;
+        val["total_count"] = (int)tasks.size();
+        
         invoker(200, headerOut, val.toStyledString());
     });
 #endif

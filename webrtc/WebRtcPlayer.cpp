@@ -15,6 +15,7 @@
 #include "Util/base64.h"
 
 using namespace std;
+using namespace toolkit;
 
 namespace mediakit {
 
@@ -45,22 +46,43 @@ RtpPacket::Ptr H264BFrameFilter::processPacket(const RtpPacket::Ptr &packet) {
         _first_packet = false;
         _last_seq = cur_seq;
         _last_stamp = cur_stamp;
+        return packet;
     }
 
     // 处理时间戳连续性问题
-    if (cur_stamp < _last_stamp) {
-        return nullptr;
+    uint32_t stamp = cur_stamp;
+    uint32_t last_stamp = _last_stamp;
+    if (stamp < last_stamp) {
+        uint32_t diff = last_stamp - stamp;
+        const uint32_t kMaxStampBackOffset = 9000;
+        if (diff > kMaxStampBackOffset) {
+            return nullptr;
+        }
+    } else {
+        _last_stamp = stamp;
     }
-    _last_stamp = cur_stamp;
 
     // 处理 seq 连续性问题
-    if (cur_seq > _last_seq + 4) {
-        RtpHeader *header = packet->getHeader();
-        _last_seq = (_last_seq + 1) & 0xFFFF;
-        header->seq = htons(_last_seq);
+    uint16_t last_seq = _last_seq;
+    uint16_t diff = static_cast<uint16_t>(cur_seq - last_seq);
+    if (diff == 0) {
+        return packet;
     }
 
-    return packet;
+    const uint16_t kMaxSeqJump = 1000;
+    if (diff > 0 && diff <= kMaxSeqJump) {
+        if (diff > 1) {
+            RtpHeader *header = packet->getHeader();
+            uint16_t new_seq = static_cast<uint16_t>(last_seq + 1);
+            header->seq = htons(new_seq);
+            _last_seq = new_seq;
+        } else {
+            _last_seq = cur_seq;
+        }
+        return packet;
+    }
+
+    return nullptr;
 }
 
 bool H264BFrameFilter::isH264BFrame(const RtpPacket::Ptr &packet) const {
@@ -167,17 +189,24 @@ uint8_t H264BFrameFilter::extractSliceType(const uint8_t *data, size_t size) con
     return -1;
 }
 
-WebRtcPlayer::Ptr WebRtcPlayer::create(const EventPoller::Ptr &poller, const RtspMediaSource::Ptr &src, const MediaInfo &info) {
+WebRtcPlayer::Ptr WebRtcPlayer::create(const EventPoller::Ptr &poller,
+                                       const RtspMediaSource::Ptr &src,
+                                       const MediaInfo &info,
+                                       WebRtcTransport::Role role,
+                                       WebRtcTransport::SignalingProtocols signaling_protocols) {
     WebRtcPlayer::Ptr ret(new WebRtcPlayer(poller, src, info), [](WebRtcPlayer *ptr) {
         ptr->onDestory();
         delete ptr;
     });
+    ret->setRole(role);
+    ret->setSignalingProtocols(signaling_protocols);
     ret->onCreate();
     return ret;
 }
 
-WebRtcPlayer::WebRtcPlayer(const EventPoller::Ptr &poller, const RtspMediaSource::Ptr &src, const MediaInfo &info)
-    : WebRtcTransportImp(poller) {
+WebRtcPlayer::WebRtcPlayer(const EventPoller::Ptr &poller,
+                           const RtspMediaSource::Ptr &src,
+                           const MediaInfo &info) : WebRtcTransportImp(poller) {
     _media_info = info;
     _play_src = src;
     CHECK(src);
@@ -262,6 +291,7 @@ void WebRtcPlayer::onStartWebRTC() {
         });
     }
 }
+
 void WebRtcPlayer::onDestory() {
     auto duration = getDuration();
     auto bytes_usage = getBytesUsage();
@@ -316,7 +346,8 @@ void WebRtcPlayer::sendConfigFrames(uint32_t before_seq, uint32_t sample_rate, u
     GET_CONFIG(uint32_t, video_mtu, Rtp::kVideoMtuSize);
     encoder->setRtpInfo(0, video_mtu, sample_rate, 0, 0, 0);
 
-    auto seq = before_seq - frames.size();
+    uint16_t base_seq = static_cast<uint16_t>(before_seq);
+    uint16_t seq = static_cast<uint16_t>(base_seq - static_cast<uint16_t>(frames.size()));
     for (const auto &frame : frames) {
         auto rtp = encoder->getRtpInfo().makeRtp(TrackVideo, frame->data() + frame->prefixSize(), frame->size() - frame->prefixSize(), false, 0);
         auto header = rtp->getHeader();
