@@ -245,21 +245,29 @@ void TranscodeManager::onMediaSourceNoneReader(MediaSource &source) {
 **基础配置** `[transcode]`
 ```ini
 enable=1                    # 启用转码功能
-maxConcurrent=8            # 最大并发数
-hwAccel=nvidia             # 硬件加速类型
-tempDir=./temp/transcode   # 临时目录
-timeoutSec=120            # 超时时间
-ffmpegBin=/usr/bin/ffmpeg # FFmpeg路径
-autoStart=1               # 自动启动
+maxConcurrent=8             # 最大并发数
+hwAccel=none                # 硬件加速类型 (none/nvidia/intel/amd/vaapi)
+tempDir=./temp/transcode    # 临时目录
+timeoutSec=120              # 超时时间
+ffmpegBin=/usr/bin/ffmpeg   # FFmpeg路径
+autoStart=1                 # 自动启动
+maxAsyncFrameSize=30        # 异步解码队列最大长度 (3~1000)
 ```
+
+其中 `maxAsyncFrameSize` 用于控制 FFmpeg 解码侧内部异步任务队列的长度，对应底层 `TaskManager::setMaxTaskSize` 以及 C API `mk_decoder_set_max_async_frame_size`，可在高并发或卡顿时按需调整。
 
 **模板配置** `[transcode_templates]`
 ```ini
-# GPU加速模板
-720p=-vcodec h264_nvenc -preset p4 -rc vbr -cq 23 -b:v 2000k -maxrate 3000k -bufsize 4000k -vf scale_cuda=1280:720 -acodec aac -b:a 128k
+[transcode_templates]
+# 推荐：模板名直接等于转码后流的 app 名（例如 480/720），方便按 app 自动匹配
 
-# CPU备用模板  
-720p_cpu=-vcodec libx264 -preset fast -b:v 2000k -vf scale=1280:720 -acodec aac -b:a 128k
+# NVENC 优化模板：低延迟 + CBR + 固定 GOP
+480=-vcodec h264_nvenc -preset p2 -rc cbr -profile:v baseline -level 3.1 -b:v 800k  -maxrate 800k  -bufsize 1600k -g 25 -bf 0 -forced-idr 1 -vf scale=854:480,fps=25,setpts=N/TB/25  -vsync cfr -acodec aac -b:a 96k
+720=-vcodec h264_nvenc -preset p2 -rc cbr -profile:v baseline -level 3.1 -b:v 2000k -maxrate 2000k -bufsize 2000k -g 25 -bf 0 -forced-idr 1 -vf scale=1280:720,fps=25,setpts=N/TB/25 -vsync cfr -acodec aac -b:a 128k
+
+# CPU 软件编码模板（同参数风格，仅将编码器改为 libx264，可按需启用）
+#480=-vcodec libx264 -preset veryfast -tune zerolatency -profile:v baseline -level 3.1 -b:v 800k  -maxrate 800k  -bufsize 1600k -g 25 -bf 0 -forced-idr 1 -vf scale=854:480,fps=25,setpts=N/TB/25  -vsync cfr -acodec aac -b:a 96k
+#720=-vcodec libx264 -preset veryfast -tune zerolatency -profile:v baseline -level 3.1 -b:v 2000k -maxrate 2000k -bufsize 2000k -g 25 -bf 0 -forced-idr 1 -vf scale=1280:720,fps=25,setpts=N/TB/25 -vsync cfr -acodec aac -b:a 128k
 ```
 
 **规则配置** `[transcode_rules]`
@@ -315,6 +323,35 @@ GET /index/api/getTranscodeTemplates?secret=xxx
 ```
 
 所有API接口都集成了ZLMediaKit的统一认证机制，使用相同的secret验证。
+
+### Watcher / WebRTC 相关接口（来自主仓同步）
+
+除了转码模块自身的 API，本分支还从主仓同步了与观看者统计和 WebRTC 真实 IP 解析相关的能力，这些接口与转码功能解耦，但在排查转码流的观众来源和负载情况时非常有用：
+
+1. `/index/api/getWatchers`
+
+   - 功能：返回最近一段时间内的历史 watcher 列表。
+   - 过滤维度：`schema`、`vhost`、`app`、`stream`、`ip`。
+   - 仅返回当前仍在线会话、且对应流仍存在的记录。
+   - 返回字段（核心）：
+     - `schema/vhost/app/stream`
+     - `ip/port/id/protocol/params/start_stamp`
+
+2. `/index/api/getMediaListWithWatchers`
+
+   - 功能：在原有 `/index/api/getMediaList` 返回的每条流对象上，附加 `watchers` 数组字段。
+   - `watchers` 为精简列表：最多前 4 个（最早）+ 最新 1 个，仅包含 `ip/port`，便于快速观察观众分布。
+
+3. `/index/api/webrtc` 中的真实 IP 处理
+
+   - 入口：HTTP 信令接口 `/index/api/webrtc`。
+   - 行为：
+     - 从 `X-Real-IP` 或 `X-Forwarded-For` 中优先提取客户端真实 IP；
+     - 如无代理头，则回退到 TCP 连接的 `peer_ip`；
+     - 调用 `setRtcSessionPeerIp(session_id, real_ip)` 将 WebRTC 信令会话与真实 IP 绑定；
+     - 后续在 `BroadcastMediaPlayed` 事件中，根据 `session` 参数和缓存的 IP，将 watcher 记录中的 IP 修正为真实客户端 IP。
+
+通过以上接口和内部缓存结构（`WatcherRecord` 队列、WebRTC session->IP 映射），可以在不影响转码行为的前提下，对观看者进行精确统计和溯源，这对于多终端、多节点部署下的转码诊断非常有帮助。
 
 ## 工作流程
 

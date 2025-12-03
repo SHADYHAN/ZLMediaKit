@@ -50,18 +50,18 @@ ZLMediaKit转码模块是一个高性能的实时流媒体转码解决方案，�
 enable=1
 
 # 最大并发转码任务数（根据硬件性能调整）
-# NVIDIA RTX 3060: 建议4-6
-# NVIDIA RTX 4080: 建议8-12  
 # CPU转码: 建议2-4
+# NVIDIA RTX 3060: 建议4-6
+# NVIDIA RTX 4080: 建议8-12
 maxConcurrent=8
 
 # 硬件加速类型
-# none: 纯CPU转码
+# none: 纯CPU转码（不添加任何 -hwaccel 参数）
 # nvidia: NVIDIA NVENC (推荐RTX系列显卡)
 # intel: Intel Quick Sync Video
 # amd: AMD VCE
 # vaapi: Linux VAAPI (Intel集显)
-hwAccel=nvidia
+hwAccel=none
 
 # 转码临时文件目录
 tempDir=./temp/transcode
@@ -75,36 +75,29 @@ ffmpegBin=ffmpeg
 
 # 是否自动启动转码（检测到媒体源时）
 autoStart=1
+
+# 异步解码队列最大长度 (3~1000)，对应底层 TaskManager::setMaxTaskSize
+maxAsyncFrameSize=30
 ```
+
+当 `hwAccel=none` 时，生成的 FFmpeg 命令不会添加任何 `-hwaccel` 相关参数，解码和编码都在 CPU 上完成，便于排查卡顿/花屏问题。
 
 ### 转码模板配置 `[transcode_templates]`
 
-转码模板定义了不同清晰度的编码参数，支持NVENC硬件加速优化：
+转码模板定义了不同清晰度的编码参数，本分支中默认提供了针对 H.264 NVENC 的低延迟 CBR 模板，并给出了等价风格的 CPU 备用模板：
 
 ```ini
 [transcode_templates]
-# NVIDIA NVENC 优化模板（推荐）
-# 使用GPU内存缩放和高效预设
-480p=-vcodec h264_nvenc -preset p4 -rc vbr -cq 23 -b:v 800k -maxrate 1200k -bufsize 1600k -vf scale_cuda=854:480 -acodec aac -b:a 96k
+# 推荐：模板名直接等于转码后流的 app 名（例如 480/720），方便按 app 自动匹配
 
-720p=-vcodec h264_nvenc -preset p4 -rc vbr -cq 23 -b:v 2000k -maxrate 3000k -bufsize 4000k -vf scale_cuda=1280:720 -acodec aac -b:a 128k
+# NVIDIA NVENC 优化模板（当前默认使用）
+480=-vcodec h264_nvenc -preset p2 -rc cbr -profile:v baseline -level 3.1 -b:v 800k  -maxrate 800k  -bufsize 1600k -g 25 -bf 0 -forced-idr 1 -vf scale=854:480,fps=25,setpts=N/TB/25  -vsync cfr -acodec aac -b:a 96k
+720=-vcodec h264_nvenc -preset p2 -rc cbr -profile:v baseline -level 3.1 -b:v 2000k -maxrate 2000k -bufsize 2000k -g 25 -bf 0 -forced-idr 1 -vf scale=1280:720,fps=25,setpts=N/TB/25 -vsync cfr -acodec aac -b:a 128k
 
-1080p=-vcodec h264_nvenc -preset p4 -rc vbr -cq 23 -b:v 4000k -maxrate 6000k -bufsize 8000k -vf scale_cuda=1920:1080 -acodec aac -b:a 192k
-
-# H.265/HEVC 模板（更高压缩比）
-720p_h265=-vcodec hevc_nvenc -preset p4 -rc vbr -cq 28 -b:v 1500k -maxrate 2250k -bufsize 3000k -vf scale_cuda=1280:720 -acodec aac -b:a 128k
-
-# CPU软件编码模板（备用方案）
-480p_cpu=-vcodec libx264 -preset fast -crf 23 -b:v 800k -vf scale=854:480 -acodec aac -b:a 96k
-720p_cpu=-vcodec libx264 -preset fast -crf 23 -b:v 2000k -vf scale=1280:720 -acodec aac -b:a 128k
-1080p_cpu=-vcodec libx264 -preset fast -crf 23 -b:v 4000k -vf scale=1920:1080 -acodec aac -b:a 192k
-
-# 特殊场景模板
-# 高帧率游戏直播
-720p_60fps=-vcodec h264_nvenc -preset p4 -rc vbr -cq 20 -b:v 3000k -maxrate 4500k -bufsize 6000k -r 60 -vf scale_cuda=1280:720 -acodec aac -b:a 128k
-
-# 低延迟直播
-720p_lowlatency=-vcodec h264_nvenc -preset p1 -tune ll -rc cbr -b:v 2000k -vf scale_cuda=1280:720 -acodec aac -b:a 128k
+# CPU 软件编码模板（备用方案，与 NVENC 模板保持相同 GOP/码率/滤镜，便于切换对比）
+480_cpu=-vcodec libx264 -preset veryfast -tune zerolatency -profile:v baseline -level 3.1 -b:v 800k  -maxrate 800k  -bufsize 1600k -g 25 -bf 0 -forced-idr 1 -vf scale=854:480,fps=25,setpts=N/TB/25  -vsync cfr -acodec aac -b:a 96k
+720_cpu=-vcodec libx264 -preset veryfast -tune zerolatency -profile:v baseline -level 3.1 -b:v 2000k -maxrate 2000k -bufsize 2000k -g 25 -bf 0 -forced-idr 1 -vf scale=1280:720,fps=25,setpts=N/TB/25 -vsync cfr -acodec aac -b:a 128k
+1080_cpu=-vcodec libx264 -preset veryfast -tune zerolatency -profile:v baseline -level 4.0 -b:v 4000k -maxrate 6000k -bufsize 8000k -g 25 -bf 0 -forced-idr 1 -vf scale=1920:1080,fps=25,setpts=N/TB/25 -vsync cfr -acodec aac -b:a 192k
 ```
 
 #### 模板参数说明
@@ -113,7 +106,7 @@ autoStart=1
 - `-preset p1-p7`: 编码预设，p1最快p7最慢但质量最好
 - `-rc vbr/cbr`: 码率控制模式，VBR可变码率，CBR恒定码率
 - `-cq 18-30`: 质量参数，越小质量越好
-- `-scale_cuda`: GPU加速缩放，比CPU缩放更高效
+- `-vf scale` / `-vf scale_cuda`: 默认使用 CPU 缩放；在显卡资源充足的场景下，可以改用 GPU 缩放以减轻 CPU 压力
 
 **通用参数**：
 - `-b:v`: 视频码率
@@ -334,7 +327,7 @@ curl -X POST "http://127.0.0.1/index/api/stopTranscode?secret=YOUR_SECRET&task_i
         "audio_bitrate": 96,
         "width": 854,
         "height": 480,
-        "params": "-vcodec h264_nvenc -preset p4 -rc vbr -cq 23 -b:v 800k"
+        "params": "-vcodec h264_nvenc -preset p2 -rc cbr -profile:v baseline -level 3.1 -b:v 800k -maxrate 800k -bufsize 1600k -g 25 -bf 0 -forced-idr 1 -vf scale=854:480,fps=25,setpts=N/TB/25 -vsync cfr -acodec aac -b:a 96k"
       }
     ]
   }
@@ -342,6 +335,87 @@ curl -X POST "http://127.0.0.1/index/api/stopTranscode?secret=YOUR_SECRET&task_i
 ```
 
 ## 使用示例
+
+### Watcher 相关 HTTP 接口
+
+本分支从主仓合并了 watcher 统计相关接口，可用于排查转码流的真实观众和来源 IP：
+
+#### 1. 获取 watcher 列表 - `/index/api/getWatchers`
+
+**接口**：`GET /index/api/getWatchers`
+
+**参数**：
+- `secret`: API密钥（必需）
+- `schema`: 协议类型过滤（可选，如 `rtsp`/`rtmp`/`rtc` 等）
+- `vhost`: 虚拟主机过滤（可选）
+- `app`: 应用名过滤（可选）
+- `stream`: 流名过滤（可选）
+- `ip`: 观众IP过滤（可选）
+
+**说明**：
+- 内部维护一个最近 watcher 环形队列（上限约300条），记录最近一段时间内的观众。
+- 对于非 `rtc` 协议，会自动过滤掉已经离线的会话以及已不存在的流。
+- 对于 WebRTC，服务器会在 `/index/api/webrtc` 中解析 `X-Real-IP`/`X-Forwarded-For`，将真实客户端 IP 注入 watcher 记录。
+
+**响应示例**（简化）：
+
+```json
+{
+  "code": 0,
+  "msg": "success",
+  "data": [
+    {
+      "schema": "rtc",
+      "vhost": "__defaultVhost__",
+      "app": "live",
+      "stream": "test",
+      "ip": "203.0.113.10",
+      "port": 52345,
+      "id": "session_xxx",
+      "protocol": "rtc",
+      "params": "session=abcd1234&type=play",
+      "start_stamp": 1700000000
+    }
+  ]
+}
+```
+
+#### 2. 获取带 watcher 信息的媒体列表 - `/index/api/getMediaListWithWatchers`
+
+**接口**：`GET /index/api/getMediaListWithWatchers`
+
+**参数**：
+- `secret`: API密钥（必需）
+- `schema`/`vhost`/`app`/`stream`: 与 `/index/api/getMediaList` 一致的过滤条件（可选）
+
+**说明**：
+- 在原有 `/index/api/getMediaList` 返回的每一路流对象上，额外增加 `watchers` 字段。
+- `watchers` 是一个精简数组，只包含部分代表性观众：
+  - 最多返回前4个（最早） + 最新1个；
+  - 每个元素仅包含 `ip` 和 `port` 两个字段，便于快速排查来源分布。
+
+**响应示例**（片段）：
+
+```json
+{
+  "code": 0,
+  "msg": "success",
+  "data": [
+    {
+      "schema": "rtsp",
+      "vhost": "__defaultVhost__",
+      "app": "live",
+      "stream": "test",
+      "watchers": [
+        {"ip": "203.0.113.10", "port": 52345},
+        {"ip": "198.51.100.20", "port": 52346}
+      ]
+    }
+  ]
+}
+```
+
+这些接口可与转码模块的统计接口配合使用，例如：先通过 `/index/api/getTranscodeList` 找到活跃的转码任务，再使用 `/index/api/getWatchers` / `/index/api/getMediaListWithWatchers` 分析真实观众分布和来源 IP。
 
 ### 基础使用流程
 
@@ -351,13 +425,13 @@ curl -X POST "http://127.0.0.1/index/api/stopTranscode?secret=YOUR_SECRET&task_i
 [transcode]
 enable=1
 maxConcurrent=4
-hwAccel=nvidia
+hwAccel=none
 
-[transcode_templates] 
-720p=-vcodec h264_nvenc -preset p4 -rc vbr -cq 23 -b:v 2000k -vf scale_cuda=1280:720 -acodec aac -b:a 128k
+[transcode_templates]
+720=-vcodec h264_nvenc -preset p2 -rc cbr -profile:v baseline -level 3.1 -b:v 2000k -maxrate 2000k -bufsize 2000k -g 25 -bf 0 -forced-idr 1 -vf scale=1280:720,fps=25,setpts=N/TB/25 -vsync cfr -acodec aac -b:a 128k
 
 [transcode_rules]
-live/*=720p
+live/*=720
 ```
 
 2. **启动MediaServer**
@@ -387,12 +461,12 @@ ffplay rtmp://127.0.0.1/live/test_720p
 **配置**：
 ```ini
 [transcode_templates]
-480p=-vcodec h264_nvenc -preset p4 -rc vbr -cq 23 -b:v 800k -vf scale_cuda=854:480 -acodec aac -b:a 96k
-720p=-vcodec h264_nvenc -preset p4 -rc vbr -cq 23 -b:v 2000k -vf scale_cuda=1280:720 -acodec aac -b:a 128k  
-1080p=-vcodec h264_nvenc -preset p4 -rc vbr -cq 23 -b:v 4000k -vf scale_cuda=1920:1080 -acodec aac -b:a 192k
+480=-vcodec h264_nvenc -preset p2 -rc cbr -profile:v baseline -level 3.1 -b:v 800k  -maxrate 800k  -bufsize 1600k -g 25 -bf 0 -forced-idr 1 -vf scale=854:480,fps=25,setpts=N/TB/25  -vsync cfr -acodec aac -b:a 96k
+720=-vcodec h264_nvenc -preset p2 -rc cbr -profile:v baseline -level 3.1 -b:v 2000k -maxrate 2000k -bufsize 2000k -g 25 -bf 0 -forced-idr 1 -vf scale=1280:720,fps=25,setpts=N/TB/25 -vsync cfr -acodec aac -b:a 128k
+1080=-vcodec h264_nvenc -preset p2 -rc cbr -profile:v baseline -level 4.0 -b:v 4000k -maxrate 6000k -bufsize 8000k -g 25 -bf 0 -forced-idr 1 -vf scale=1920:1080,fps=25,setpts=N/TB/25 -vsync cfr -acodec aac -b:a 192k
 
 [transcode_rules]
-live/*=480p,720p,1080p
+live/*=480,720,1080
 ```
 
 **自动转码**：当推送到`live/`应用的流会自动生成3个码率版本。
@@ -416,13 +490,13 @@ vod/*=720p
 ```ini
 [transcode_templates]
 # GPU转码高清版本
-1080p_gpu=-vcodec h264_nvenc -preset p4 -rc vbr -cq 23 -b:v 4000k -vf scale_cuda=1920:1080 -acodec aac -b:a 192k
+1080_gpu=-vcodec h264_nvenc -preset p2 -rc cbr -profile:v baseline -level 4.0 -b:v 4000k -maxrate 6000k -bufsize 8000k -g 25 -bf 0 -forced-idr 1 -vf scale=1920:1080,fps=25,setpts=N/TB/25 -vsync cfr -acodec aac -b:a 192k
 
-# CPU转码低清版本  
-480p_cpu=-vcodec libx264 -preset fast -crf 23 -b:v 800k -vf scale=854:480 -acodec aac -b:a 96k
+# CPU转码低清版本
+480_cpu=-vcodec libx264 -preset veryfast -tune zerolatency -profile:v baseline -level 3.1 -b:v 800k  -maxrate 800k  -bufsize 1600k -g 25 -bf 0 -forced-idr 1 -vf scale=854:480,fps=25,setpts=N/TB/25  -vsync cfr -acodec aac -b:a 96k
 
 [transcode_rules]
-live/hd_*=1080p_gpu,480p_cpu
+live/hd_*=1080_gpu,480_cpu
 ```
 
 ### 监控和管理
@@ -461,20 +535,21 @@ done
 ```ini
 [transcode]
 # RTX 3060: 4-6个并发
-# RTX 3080: 6-8个并发  
+# RTX 3080: 6-8个并发
 # RTX 4080: 8-12个并发
 maxConcurrent=8
+hwAccel=nvidia
 
 [transcode_templates]
-# 使用高效预设和GPU缩放
-720p=-vcodec h264_nvenc -preset p4 -rc vbr -cq 23 -b:v 2000k -vf scale_cuda=1280:720 -acodec aac -b:a 128k
+# 使用低延迟 CBR 模板，便于与 CPU 模板对比
+720=-vcodec h264_nvenc -preset p2 -rc cbr -profile:v baseline -level 3.1 -b:v 2000k -maxrate 2000k -bufsize 2000k -g 25 -bf 0 -forced-idr 1 -vf scale=1280:720,fps=25,setpts=N/TB/25 -vsync cfr -acodec aac -b:a 128k
 ```
 
 #### CPU优化
 ```ini
 [transcode_templates]
-# CPU转码使用更快预设
-720p_cpu=-vcodec libx264 -preset faster -crf 23 -b:v 2000k -threads 4 -vf scale=1280:720 -acodec aac -b:a 128k
+# CPU转码使用 faster/veryfast 预设，配合与 NVENC 相同的 GOP/码率
+720_cpu=-vcodec libx264 -preset veryfast -tune zerolatency -profile:v baseline -level 3.1 -b:v 2000k -maxrate 2000k -bufsize 2000k -g 25 -bf 0 -forced-idr 1 -vf scale=1280:720,fps=25,setpts=N/TB/25 -vsync cfr -acodec aac -b:a 128k
 ```
 
 ### 内存和存储优化
