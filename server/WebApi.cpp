@@ -623,6 +623,10 @@ void addStreamProxy(const MediaTuple &tuple, const string &url, int retry_count,
     player->play(url);
 };
 
+void delStreamProxy(const string &key) {
+    s_player_proxy.erase(key);
+}
+
 
 void addStreamPusherProxy(const string &schema,
                           const string &vhost,

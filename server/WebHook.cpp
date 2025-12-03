@@ -14,6 +14,7 @@
 #include "Util/NoticeCenter.h"
 #include "Common/config.h"
 #include "Common/MediaSource.h"
+#include "Transcode/TranscodeManager.h"
 #include "Http/HttpSession.h"
 #include "Http/HttpRequester.h"
 #include "Network/Session.h"
@@ -87,11 +88,13 @@ namespace Cluster {
 const string kOriginUrl = CLUSTER_FIELD "origin_url";
 const string kTimeoutSec = CLUSTER_FIELD "timeout_sec";
 const string kRetryCount = CLUSTER_FIELD "retry_count";
+const string kSourceApp = CLUSTER_FIELD "transcode_source_app";
 
 static onceToken token([]() {
     mINI::Instance()[kOriginUrl] = "";
     mINI::Instance()[kTimeoutSec] = 15;
     mINI::Instance()[kRetryCount] = 3;
+    mINI::Instance()[kSourceApp] = "";
 });
 
 } // namespace Cluster
@@ -333,6 +336,39 @@ static void pullStreamFromOrigin(const vector<string> &urls, size_t index, size_
     });
 }
 
+static void selectOriginForTranscode(const vector<string> &urls, size_t index, size_t failed_cnt, const MediaInfo &args,
+                                     const function<void(const string &url)> &onSuccess,
+                                     const function<void()> &onFail) {
+    GET_CONFIG(float, cluster_timeout_sec, Cluster::kTimeoutSec);
+    GET_CONFIG(int, retry_count, Cluster::kRetryCount);
+
+    auto url = getPullUrl(urls[index % urls.size()], args);
+    auto timeout_sec = cluster_timeout_sec / urls.size();
+    InfoL << "select origin for transcode, failed_cnt: " << failed_cnt << ", timeout_sec: " << timeout_sec << ", url: " << url;
+
+    ProtocolOption option;
+    option.enable_hls = option.enable_hls || (args.schema == HLS_SCHEMA);
+    option.enable_mp4 = false;
+
+    addStreamProxy(args, url, retry_count, option, Rtsp::RTP_TCP, timeout_sec, mINI{}, [=](const SockException &ex, const string &key) mutable {
+        if (!ex) {
+            // Probe succeeded: immediately remove this temporary pull proxy so that
+            // only FFmpeg keeps a connection to the selected origin.
+            delStreamProxy(key);
+            onSuccess(url);
+            return;
+        }
+        if (++failed_cnt == urls.size()) {
+            WarnL << "select origin for transcode final failed: " << url;
+            if (onFail) {
+                onFail();
+            }
+            return;
+        }
+        selectOriginForTranscode(urls, index + 1, failed_cnt, args, onSuccess, onFail);
+    });
+}
+
 static void *web_hook_tag = nullptr;
 
 static mINI jsonToMini(const Value &obj) {
@@ -529,9 +565,86 @@ void installWebHook() {
     // 监听播放失败(未找到特定的流)事件  [AUTO-TRANSLATED:ca8cc9ba]
     // Listen to playback failure (specific stream not found) event
     NoticeCenter::Instance().addListener(&web_hook_tag, Broadcast::kBroadcastNotFoundStream, [](BroadcastNotFoundStreamArgs) {
+        // 统一逻辑：优先本地源流转码，其次源站源流转码，最后回退到原始溯源/Hook
+        GET_CONFIG(string, source_app, Cluster::kSourceApp);
+
+#if defined(ENABLE_TRANSCODE)
+        auto &trans_cfg = TranscodeConfig::Instance();
+        bool transcode_enabled = trans_cfg.isEnabled();
+#else
+        bool transcode_enabled = false;
+#endif
+
+        bool can_transcode = transcode_enabled && !source_app.empty() && (args.app != source_app);
+
+        if (can_transcode) {
+#if defined(ENABLE_TRANSCODE)
+            auto local_source = MediaSource::find(args.schema, args.vhost, source_app, args.stream, false);
+
+            auto templates = trans_cfg.getMatchedTemplates(args.app, args.stream);
+            if (templates.empty()) {
+                auto tmpl = trans_cfg.getTemplate(args.app);
+                if (tmpl) {
+                    templates.push_back(args.app);
+                }
+            }
+
+            if (!templates.empty()) {
+                if (local_source) {
+                    string input_url = StrPrinter << "rtmp://127.0.0.1:1935/" << source_app << "/" << args.stream;
+
+                    InfoL << "auto transcode from local source stream proxy, app=" << args.app
+                          << ", stream=" << args.stream
+                          << ", source_app=" << source_app
+                          << ", input_url=" << input_url
+                          << ", local_source=" << 1;
+
+                    bool ok = TranscodeManager::Instance().startTranscode(args.app, args.stream, templates, input_url);
+                    if (ok) {
+                        return;
+                    }
+
+                    WarnL << "start transcode failed, will fallback to cluster/hook: "
+                          << args.app << "/" << args.stream;
+                } else if (!origin_urls.empty()) {
+                    MediaInfo src_info = args;
+                    src_info.app = source_app;
+
+                    static atomic<uint8_t> s_trans_index { 0 };
+                    auto start_index = s_trans_index.load();
+                    ++s_trans_index;
+
+                    auto app = args.app;
+                    auto stream = args.stream;
+
+                    selectOriginForTranscode(origin_urls, start_index, 0, src_info,
+                                             [app, stream, source_app, templates](const string &url) mutable {
+                                                 InfoL << "auto transcode from origin source stream, app=" << app
+                                                       << ", stream=" << stream
+                                                       << ", source_app=" << source_app
+                                                       << ", input_url=" << url;
+
+                                                 bool ok = TranscodeManager::Instance().startTranscode(app, stream, templates, url);
+                                                 if (!ok) {
+                                                     WarnL << "start transcode from origin source failed: "
+                                                           << app << "/" << stream;
+                                                 }
+                                             },
+                                             [app = args.app, stream = args.stream]() {
+                                                 WarnL << "no available origin for source stream, skip transcode for: "
+                                                       << app << "/" << stream;
+                                             });
+                    return;
+                } else {
+                    WarnL << "no local source stream and no origin_urls, skip transcode for: "
+                          << args.app << "/" << args.stream;
+                }
+            }
+#endif
+        }
+
         if (!origin_urls.empty()) {
-            // 设置了源站，那么尝试溯源  [AUTO-TRANSLATED:541a4ced]
-            // If the source station is set, then try to trace the source
+            // 设置了源站，按原始逻辑溯源同名流
             static atomic<uint8_t> s_index { 0 };
             pullStreamFromOrigin(origin_urls, s_index.load(), 0, args, closePlayer);
             ++s_index;

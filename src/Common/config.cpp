@@ -395,7 +395,7 @@ static onceToken token([]() {
 });
 } // namespace RtpProxy
 
-// //////////转码配置///////////
+// //////////转码配置///////////  [AUTO-TRANSLATED:7b285587]
 // //////////Transcode Configuration///////////
 namespace Transcode {
 #define TRANSCODE_FIELD "transcode."
@@ -406,6 +406,7 @@ const string kTempDir = TRANSCODE_FIELD "tempDir";
 const string kTimeoutSec = TRANSCODE_FIELD "timeoutSec";
 const string kFFmpegBin = TRANSCODE_FIELD "ffmpegBin";
 const string kAutoStart = TRANSCODE_FIELD "autoStart";
+const string kMaxAsyncFrameSize = TRANSCODE_FIELD "maxAsyncFrameSize";
 
 // 按需转码配置
 const string kOnDemandEnabled = TRANSCODE_FIELD "onDemandEnabled";
@@ -421,12 +422,21 @@ static onceToken token([]() {
     mINI::Instance()[kTimeoutSec] = 300;
     mINI::Instance()[kFFmpegBin] = "ffmpeg";
     mINI::Instance()[kAutoStart] = 1;
+    mINI::Instance()[kMaxAsyncFrameSize] = 30;
     
     // 按需转码默认配置
     mINI::Instance()[kOnDemandEnabled] = 1;  // 启用按需转码
     mINI::Instance()[kStopDelaySeconds] = 60;  // 1分钟后停止
     mINI::Instance()[kCheckIntervalSeconds] = 10;  // 每10秒检查一次
     mINI::Instance()[kStartOnlyWithPlayer] = 0;  // 还是自动启动，但无播放器时停止
+
+    // 默认转码模板：与 conf/config.ini 中的示例保持一致（NVENC + AAC, CBR, GOP 25，固定帧率），仅保留 480/720，1080 作为源流由用户自行配置
+    mINI::Instance()[string(kTranscodeTemplates) + ".480"] =
+        "-vcodec h264_nvenc -preset p2 -rc cbr -profile:v baseline -level 3.1 -b:v 800k -maxrate 800k -bufsize 1600k -g 25 -bf 0 -forced-idr 1 "
+        "-vf scale=854:480,fps=25,setpts=N/TB/25 -vsync cfr -acodec aac -b:a 96k";
+    mINI::Instance()[string(kTranscodeTemplates) + ".720"] =
+        "-vcodec h264_nvenc -preset p2 -rc cbr -profile:v baseline -level 3.1 -b:v 2000k -maxrate 2000k -bufsize 2000k -g 25 -bf 0 -forced-idr 1 "
+        "-vf scale=1280:720,fps=25,setpts=N/TB/25 -vsync cfr -acodec aac -b:a 128k";
 });
 } // namespace Transcode
 

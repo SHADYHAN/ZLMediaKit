@@ -316,6 +316,8 @@ static inline const AVCodec *getCodecByName(const std::vector<std::string> &code
 FFmpegDecoder::FFmpegDecoder(const Track::Ptr &track, int thread_num, const std::vector<std::string> &codec_name) {
     setupFFmpeg();
     _frame_pool.setSize(AV_NUM_DATA_POINTERS);
+    GET_CONFIG(int, max_async_frame_size, Transcode::kMaxAsyncFrameSize);
+    setMaxTaskSize(max_async_frame_size);
     const AVCodec *codec = nullptr;
     const AVCodec *codec_default = nullptr;
     if (!codec_name.empty()) {

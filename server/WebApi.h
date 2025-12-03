@@ -243,6 +243,9 @@ void addStreamProxy(const mediakit::MediaTuple &tuple, const std::string &url, i
                     const mediakit::ProtocolOption &option, int rtp_type, float timeout_sec, const toolkit::mINI &args,
                     const std::function<void(const toolkit::SockException &ex, const std::string &key)> &cb);
 
+// Delete a pull stream proxy by key (same key as returned by addStreamProxy callback)
+void delStreamProxy(const std::string &key);
+
 template <typename Type>
 class ServiceController {
 public:

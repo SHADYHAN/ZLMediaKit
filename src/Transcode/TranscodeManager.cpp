@@ -358,7 +358,7 @@ void TranscodeManager::onMediaSourceRegist(MediaSource &source, bool regist) {
             return;
         }
         
-        // 获取匹配的模板
+        // 获取匹配的模板（如果你不在配置里写 transcode_rules.*，这里就不会触发自动转码）
         auto templates = config.getMatchedTemplates(app, stream);
         if (!templates.empty()) {
             InfoL << "Auto starting transcode for: " << app << "/" << stream;
@@ -466,8 +466,8 @@ string TranscodeManager::buildInputUrl(const string &app, const string &stream) 
 
 string TranscodeManager::buildOutputUrl(const string &app, const string &stream, 
                                        const string &template_name) const {
-    // 构建输出URL，添加模板名称后缀
-    return "rtmp://127.0.0.1:1935/" + app + "/" + stream + "_" + template_name;
+    // 构建输出URL：直接使用 app/stream 作为输出地址，由上层通过 app 区分清晰度
+    return "rtmp://127.0.0.1:1935/" + app + "/" + stream;
 }
 
 void TranscodeManager::onSessionResult(const string &task_id, const string &template_name,

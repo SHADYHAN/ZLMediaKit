@@ -624,6 +624,8 @@ extern const std::string kTimeoutSec;
 extern const std::string kFfmpegBin;
 // 是否自动启动转码
 extern const std::string kAutoStart;
+// 最大异步解码任务队列长度
+extern const std::string kMaxAsyncFrameSize;
 
 // 按需转码配置
 // 是否启用按需转码

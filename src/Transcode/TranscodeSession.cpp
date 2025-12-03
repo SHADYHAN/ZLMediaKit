@@ -231,10 +231,10 @@ void TranscodeSession::stopFFmpegProcess() {
             WarnL << "Failed to send SIGTERM to FFmpeg process: " << strerror(errno);
         }
         
-        // 等待进程结束，使用更长的超时时间以适应高分辨率视频
+        // 等待进程结束：这里采用较短的总等待时间，避免在程序退出(Ctrl+C)时长时间阻塞
         int status;
         int wait_count = 0;
-        const int max_wait_count = 10; // 最多等待10秒
+        const int max_wait_count = 5; // 最多等待约1秒
         
         while (wait_count < max_wait_count) {
             int ret = waitpid(_ffmpeg_pid, &status, WNOHANG);
@@ -249,7 +249,7 @@ void TranscodeSession::stopFFmpegProcess() {
             }
             
             // 进程还在运行，继续等待
-            usleep(1000000); // 等待1秒
+            usleep(200000); // 等待200毫秒
             wait_count++;
         }
         
@@ -262,12 +262,13 @@ void TranscodeSession::stopFFmpegProcess() {
             
             // 最后等待进程彻底结束
             int final_wait_count = 0;
-            while (final_wait_count < 3) {
+            const int max_final_wait = 5; // 最多再等约1秒
+            while (final_wait_count < max_final_wait) {
                 int ret = waitpid(_ffmpeg_pid, &status, WNOHANG);
                 if (ret == _ffmpeg_pid || ret == -1) {
                     break;
                 }
-                usleep(1000000); // 等待1秒
+                usleep(200000); // 等待200毫秒
                 final_wait_count++;
             }
         }
@@ -329,7 +330,8 @@ void TranscodeSession::watchFFmpegProcess() {
 }
 
 void TranscodeSession::parseFFmpegOutput(const string &line) {
-    // 解析FFmpeg输出，提取进度信息
+    // 解析FFmpeg输出，提取进度信息，并输出原始日志方便排查问题
+    DebugL << "FFmpeg[" << _session_id << "]: " << line;
     // 示例输出: frame=  123 fps= 25 q=28.0 size=    1024kB time=00:00:05.12 bitrate=1638.4kbits/s speed=1.02x
     
     static regex frame_regex(R"(frame=\s*(\d+))");
@@ -418,7 +420,7 @@ string TranscodeSession::getHWAccelParams() const {
 
 string TranscodeSession::getOutputParams() const {
     // 默认输出参数
-    return "-f flv -avoid_negative_ts make_zero";
+    return "-f flv";
 }
 
 } // namespace mediakit

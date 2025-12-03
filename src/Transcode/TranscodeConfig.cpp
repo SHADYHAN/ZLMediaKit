@@ -220,13 +220,19 @@ bool TranscodeConfig::parseTemplate(const string &name, const string &params, Tr
         tokens.push_back(token);
     }
     
+    bool in_audio = false;
+    string video_extra;
+    string audio_extra;
+    
     for (size_t i = 0; i < tokens.size(); ++i) {
         const string &token = tokens[i];
         
         if (token == "-vcodec" && i + 1 < tokens.size()) {
             tmpl.video_codec = tokens[++i];
+            in_audio = false;
         } else if (token == "-acodec" && i + 1 < tokens.size()) {
             tmpl.audio_codec = tokens[++i];
+            in_audio = true;
         } else if (token == "-b:v" && i + 1 < tokens.size()) {
             string bitrate_str = tokens[++i];
             if (bitrate_str.back() == 'k' || bitrate_str.back() == 'K') {
@@ -251,8 +257,21 @@ bool TranscodeConfig::parseTemplate(const string &name, const string &params, Tr
             tmpl.filter_params += " -vf " + vf;
         } else if (token == "-r" && i + 1 < tokens.size()) {
             tmpl.fps = stoi(tokens[++i]);
+        } else {
+            // 其它参数（如 -preset, -rc, -profile:v, -level, -maxrate, -bufsize, -g, -bf, -forced-idr, -vsync 等）
+            // 归类到 video_params/audio_params，保证在 getFFmpegParams() 中原样拼接回去
+            string *dst = in_audio ? &audio_extra : &video_extra;
+            (*dst) += " " + token;
+
+            // 大多数此类参数后面都会跟一个取值（例如 -preset p2），如果下一个 token 不是另一个选项，则一并加入
+            if (i + 1 < tokens.size() && !tokens[i + 1].empty() && tokens[i + 1][0] != '-') {
+                (*dst) += " " + tokens[++i];
+            }
         }
     }
+    
+    tmpl.video_params = std::move(video_extra);
+    tmpl.audio_params = std::move(audio_extra);
     
     return tmpl.isValid();
 }
