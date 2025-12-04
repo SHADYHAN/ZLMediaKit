@@ -39,6 +39,7 @@ const string kEnable = HOOK_FIELD "enable";
 const string kTimeoutSec = HOOK_FIELD "timeoutSec";
 const string kOnPublish = HOOK_FIELD "on_publish";
 const string kOnPlay = HOOK_FIELD "on_play";
+const string kOnPlayReport = HOOK_FIELD "on_play_report";
 const string kOnFlowReport = HOOK_FIELD "on_flow_report";
 const string kOnRtspRealm = HOOK_FIELD "on_rtsp_realm";
 const string kOnRtspAuth = HOOK_FIELD "on_rtsp_auth";
@@ -66,6 +67,7 @@ static onceToken token([]() {
     // Default hook address is set to empty, using default behavior (e.g. no authentication)
     mINI::Instance()[kOnPublish] = "";
     mINI::Instance()[kOnPlay] = "";
+    mINI::Instance()[kOnPlayReport] = "";
     mINI::Instance()[kOnFlowReport] = "";
     mINI::Instance()[kOnRtspRealm] = "";
     mINI::Instance()[kOnRtspAuth] = "";
@@ -487,6 +489,33 @@ void installWebHook() {
         do_http_hook(hook_play, body, [invoker](const Value &obj, const string &err) { invoker(err); });
     });
 
+    // 独立的播放统计上报事件，不参与鉴权，仅用于统计
+    NoticeCenter::Instance().addListener(&web_hook_tag, Broadcast::kBroadcastMediaPlayed, [](BroadcastMediaPlayedArgs) {
+        GET_CONFIG(string, hook_play_report, Hook::kOnPlayReport);
+        if (!hook_enable || hook_play_report.empty()) {
+            return;
+        }
+        auto body = make_json(args);
+        // 默认使用会话层对端 IP；如果是 WebRTC，则优先使用 HTTP 信令阶段缓存的真实客户端 IP
+        string real_ip = sender.get_peer_ip();
+        if (args.schema == "rtc" || args.protocol == "rtc") {
+            auto kv = Parser::parseArgs(args.params);
+            auto it = kv.find("session");
+            if (it != kv.end()) {
+                auto ip_it = s_rtc_session_ip.find(it->second);
+                if (ip_it != s_rtc_session_ip.end() && !ip_it->second.empty()) {
+                    real_ip = ip_it->second;
+                }
+            }
+        }
+        body["ip"] = real_ip;
+        body["port"] = sender.get_peer_port();
+        body["id"] = sender.getIdentifier();
+        // 执行hook  [AUTO-TRANSLATED:1df68201]
+        // Execute hook
+        do_http_hook(hook_play_report, body, nullptr);
+    });
+
     NoticeCenter::Instance().addListener(&web_hook_tag, Broadcast::kBroadcastFlowReport, [](BroadcastFlowReportArgs) {
         GET_CONFIG(string, hook_flowreport, Hook::kOnFlowReport);
         if (!hook_enable || hook_flowreport.empty()) {
@@ -496,7 +525,20 @@ void installWebHook() {
         body["totalBytes"] = (Json::UInt64)totalBytes;
         body["duration"] = (Json::UInt64)totalDuration;
         body["player"] = isPlayer;
-        body["ip"] = sender.get_peer_ip();
+        // 默认使用会话层的对端 IP；对 WebRTC 播放则尝试使用 HTTP 信令阶段缓存的真实客户端 IP
+        string real_ip = sender.get_peer_ip();
+        if (args.schema == "rtc" || args.protocol == "rtc") {
+            auto kv = Parser::parseArgs(args.params);
+            auto it = kv.find("session");
+            if (it != kv.end()) {
+                auto ip_it = s_rtc_session_ip.find(it->second);
+                if (ip_it != s_rtc_session_ip.end() && !ip_it->second.empty()) {
+                    real_ip = ip_it->second;
+                }
+            }
+        }
+
+        body["ip"] = real_ip;
         body["port"] = sender.get_peer_port();
         body["id"] = sender.getIdentifier();
         // 执行hook  [AUTO-TRANSLATED:1df68201]
