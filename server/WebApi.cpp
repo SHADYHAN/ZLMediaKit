@@ -2221,7 +2221,7 @@ void installWebApi() {
         }
 
         auto args = std::make_shared<WebRtcArgsImp<std::string>>(allArgs, session_id);
-        // cache real client ip for rtc watcher mapping
+        // cache real client ip for rtc watcher / flow mapping
         setRtcSessionPeerIp(session_id, real_ip);
         WebRtcPluginManager::Instance().negotiateSdp(session, type, *args, [invoker, val, offer, headerOut](const WebRtcInterface &exchanger) mutable {
             auto &handler = const_cast<WebRtcInterface &>(exchanger);
@@ -2244,8 +2244,34 @@ void installWebApi() {
         CHECK(!offer.empty(), "http body(webrtc offer sdp) is empty");
 
         auto &session = static_cast<Session&>(sender);
+        auto session_id = sender.getIdentifier();
+
+        // 与 /index/api/webrtc 保持一致：优先从 HTTP 头获取真实客户端 IP
+        std::string real_ip;
+        auto &parser = allArgs.parser;
+        auto &headers = parser.getHeader();
+
+        real_ip = headers["X-Real-IP"];
+        if (real_ip.empty()) {
+            auto xff = headers["X-Forwarded-For"];
+            if (!xff.empty()) {
+                auto pos = xff.find(',');
+                if (pos != std::string::npos) {
+                    real_ip = xff.substr(0, pos);
+                } else {
+                    real_ip = xff;
+                }
+            }
+        }
+        if (real_ip.empty()) {
+            real_ip = session.get_peer_ip();
+        }
+
+        // 缓存 WHIP/WHEP 的真实客户端 IP，供后续 rtc 播放 hook 使用
+        setRtcSessionPeerIp(session_id, real_ip);
+
         auto location = std::string(session.overSsl() ? "https://" : "http://") + allArgs["host"] + delete_webrtc_url;
-        auto args = std::make_shared<WebRtcArgsImp<std::string>>(allArgs, sender.getIdentifier());
+        auto args = std::make_shared<WebRtcArgsImp<std::string>>(allArgs, session_id);
         WebRtcPluginManager::Instance().negotiateSdp(session, type, *args, [invoker, offer, headerOut, location](const WebRtcInterface &exchanger) mutable {
             auto &handler = const_cast<WebRtcInterface &>(exchanger);
             try {
