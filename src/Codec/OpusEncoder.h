@@ -139,7 +139,7 @@ private:
     
     FFmpegDecoder::Ptr _decoder;
     FFmpegSwr::Ptr _resampler;
-    OpusEncoder::Ptr _encoder;
+    FFmpegEncoder::Ptr _encoder;
     
     onOutput _on_output;
     Track::Ptr _output_track;

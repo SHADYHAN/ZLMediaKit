@@ -334,37 +334,44 @@ AudioTranscoder::AudioTranscoder(const Track::Ptr &track,
 #endif
     
     // 创建 Opus 编码器
-    try {
-        _encoder = std::make_shared<OpusEncoder>(target_sample_rate, target_channels, target_bitrate);
-    } catch (std::exception &ex) {
-        throw std::runtime_error(string("Failed to create Opus encoder: ") + ex.what());
-    }
-    
-    // 创建输出 Track
     _output_track = Factory::getTrackByCodecId(CodecOpus, target_sample_rate, target_channels, 0);
     if (!_output_track) {
         throw std::runtime_error("Failed to create Opus track");
     }
-    
+    _output_track->setBitRate(_target_bitrate);
+
+    // 创建 FFmpeg 编码器
+    try {
+        _encoder = std::make_shared<FFmpegEncoder>(_output_track);
+    } catch (std::exception &ex) {
+        throw std::runtime_error(string("Failed to create Opus encoder: ") + ex.what());
+    }
+
     // 设置解码回调
     // 注意：这里使用裸 this 指针，生命周期由析构函数中的 stopThread 保证
     // 析构时会先停止线程，再析构成员，确保回调不会访问已销毁的对象
     _decoder->setOnDecode([this](const FFmpegFrame::Ptr &frame) {
         onDecoded(frame);
     });
-    
+
     // 设置编码回调
-    _encoder->setOnOutput([this](const Frame::Ptr &frame) {
+    _encoder->setOnEncode([this](const Frame::Ptr &frame) {
         onEncoded(frame);
     });
-    
+
     InfoL << "AudioTranscoder created successfully";
 }
 
 AudioTranscoder::~AudioTranscoder() {
     // Clear callbacks first to prevent any further calls during destruction
     _on_output = nullptr;
-    
+    if (_encoder) {
+        _encoder->setOnEncode(nullptr);
+    }
+    if (_decoder) {
+        _decoder->setOnDecode(nullptr);
+    }
+
     // Stop encoder thread before decoder to prevent callback issues
     if (_encoder) {
         _encoder->stopThread(true);
@@ -374,7 +381,7 @@ AudioTranscoder::~AudioTranscoder() {
     if (_decoder) {
         _decoder->stopThread(true);
     }
-    
+
     if (_input_frame_count > 0) {
         InfoL << "AudioTranscoder destroyed"
               << ", in=" << _input_frame_count
@@ -386,9 +393,9 @@ bool AudioTranscoder::inputFrame(const Frame::Ptr &frame) {
     if (!_decoder || !frame) {
         return false;
     }
-    
+
     _input_frame_count++;
-    
+
     // 输入帧到解码器（异步解码）
     return _decoder->inputFrame(frame, true, true);
 }
@@ -397,13 +404,13 @@ void AudioTranscoder::onDecoded(const FFmpegFrame::Ptr &pcm_frame) {
     if (!pcm_frame || !_resampler) {
         return;
     }
-    
+
     // 重采样到目标格式
     auto resampled = _resampler->inputFrame(pcm_frame);
     if (!resampled) {
         return;
     }
-    
+
     // 编码为 Opus（异步编码）
     if (_encoder) {
         _encoder->inputFrame(resampled, true);
@@ -414,15 +421,15 @@ void AudioTranscoder::onEncoded(const Frame::Ptr &opus_frame) {
     if (!opus_frame) {
         return;
     }
-    
+
     _output_frame_count++;
-    
+
     try {
         // 更新输出 Track
         if (_output_track) {
             _output_track->inputFrame(opus_frame);
         }
-        
+
         // 回调给上层
         if (_on_output) {
             _on_output(opus_frame);

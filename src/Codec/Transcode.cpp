@@ -12,10 +12,12 @@
 #if !defined(_WIN32)
 #include <dlfcn.h>
 #endif
+#include <cfloat>
 #include "Util/File.h"
 #include "Util/uv_errno.h"
 #include "Transcode.h"
 #include "Common/config.h"
+#include "Extension/Factory.h"
 
 #define MAX_DELAY_SECOND 3
 
@@ -245,6 +247,17 @@ void FFmpegFrame::fillPicture(AVPixelFormat target_format, int target_width, int
     assert(_data == nullptr);
     _data = new char[av_image_get_buffer_size(target_format, target_width, target_height, 32)];
     av_image_fill_arrays(_frame->data, _frame->linesize, (uint8_t *) _data,  target_format, target_width, target_height, 32);
+}
+
+int FFmpegFrame::getChannels() const {
+    if (!_frame) {
+        return 0;
+    }
+#if LIBAVCODEC_VERSION_INT >= FF_CODEC_VER_7_1
+    return _frame->ch_layout.nb_channels;
+#else
+    return _frame->channels;
+#endif
 }
 
 ///////////////////////////////////////////////////////////////////////////
@@ -593,8 +606,17 @@ void FFmpegDecoder::onDecode(const FFmpegFrame::Ptr &frame) {
 #if LIBAVCODEC_VERSION_INT >= FF_CODEC_VER_7_1
 FFmpegSwr::FFmpegSwr(AVSampleFormat output, AVChannelLayout *ch_layout, int samplerate) {
     _target_format = output;
-    av_channel_layout_copy(&_target_ch_layout, ch_layout);
     _target_samplerate = samplerate;
+
+    if (!ch_layout) {
+        throw std::invalid_argument("AVChannelLayout pointer cannot be nullptr");
+    }
+
+    memset(&_target_ch_layout, 0, sizeof(_target_ch_layout));
+    int ret = av_channel_layout_copy(&_target_ch_layout, ch_layout);
+    if (ret < 0) {
+        throw std::runtime_error("Failed to copy AVChannelLayout: invalid source layout");
+    }
 }
 #else
 FFmpegSwr::FFmpegSwr(AVSampleFormat output, int channel, int channel_layout, int samplerate) {
@@ -634,10 +656,10 @@ FFmpegFrame::Ptr FFmpegSwr::inputFrame(const FFmpegFrame::Ptr &frame) {
 
 #if LIBAVCODEC_VERSION_INT >= FF_CODEC_VER_7_1
         _ctx = swr_alloc();
-        swr_alloc_set_opts2(&_ctx, 
-                    &_target_ch_layout, _target_format, _target_samplerate, 
-                    &frame->get()->ch_layout, (AVSampleFormat)frame->get()->format, frame->get()->sample_rate,
-                     0, nullptr);
+        swr_alloc_set_opts2(&_ctx,
+                            &_target_ch_layout, _target_format, _target_samplerate,
+                            &frame->get()->ch_layout, (AVSampleFormat) frame->get()->format, frame->get()->sample_rate,
+                            0, nullptr);
 #else
         _ctx = swr_alloc_set_opts(nullptr, _target_channel_layout, _target_format, _target_samplerate,
                                   frame->get()->channel_layout, (AVSampleFormat) frame->get()->format,
@@ -652,8 +674,12 @@ FFmpegFrame::Ptr FFmpegSwr::inputFrame(const FFmpegFrame::Ptr &frame) {
         out->get()->format = _target_format;
 
 #if LIBAVCODEC_VERSION_INT >= FF_CODEC_VER_7_1
-        out->get()->ch_layout = _target_ch_layout;
-        av_channel_layout_copy(&(out->get()->ch_layout), &_target_ch_layout);
+        memset(&out->get()->ch_layout, 0, sizeof(out->get()->ch_layout));
+        int ret_ch = av_channel_layout_copy(&(out->get()->ch_layout), &_target_ch_layout);
+        if (ret_ch < 0) {
+            WarnL << "Failed to copy channel layout in swr output: " << ffmpeg_err(ret_ch);
+            return nullptr;
+        }
 #else
         out->get()->channel_layout = _target_channel_layout;
         out->get()->channels = _target_channels;
@@ -806,6 +832,322 @@ std::tuple<bool, std::string> FFmpegUtils::saveFrame(const FFmpegFrame::Ptr &fra
     }
     DebugL << "Screenshot successful: " << filename;
     return make_tuple<bool, std::string>(true, "");
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+
+class FFmpegAudioFifo {
+public:
+    FFmpegAudioFifo() = default;
+    ~FFmpegAudioFifo() {
+        if (_fifo) {
+            av_audio_fifo_free(_fifo);
+            _fifo = nullptr;
+        }
+    }
+
+    bool Write(const AVFrame *frame) {
+        _format = (AVSampleFormat)frame->format;
+        if (!_fifo) {
+            _fifo = av_audio_fifo_alloc(_format,
+#if LIBAVCODEC_VERSION_INT >= FF_CODEC_VER_7_1
+                                        frame->ch_layout.nb_channels,
+#else
+                                        frame->channels,
+#endif
+                                        frame->nb_samples);
+            if (!_fifo) {
+                WarnL << "av_audio_fifo_alloc error";
+                return false;
+            }
+        }
+
+#if LIBAVCODEC_VERSION_INT >= FF_CODEC_VER_7_1
+        _channels = frame->ch_layout.nb_channels;
+#else
+        _channels = frame->channels;
+#endif
+        if (_samplerate != frame->sample_rate) {
+            _samplerate = frame->sample_rate;
+            // assume pts is in ms
+            _timebase = 1000.0 / _samplerate;
+        }
+        if (frame->pts != AV_NOPTS_VALUE) {
+            double tsp = frame->pts - _timebase * av_audio_fifo_size(_fifo);
+            if (fabs(_tsp) < DBL_EPSILON) {
+                // 第一次初始化基准时间戳，后续主要依赖 FIFO 按采样数累加保持平滑
+                _tsp = tsp;
+                InfoL << "reset base_tsp " << 0 << "->" << (int64_t)tsp;
+            } else {
+                double diff = tsp - _tsp;
+                // 仅在极端情况下（>5s 漂移）才做一次硬重置，避免时间轴完全跑飞
+                if (fabs(diff) > 5000) {
+                    InfoL << "reset base_tsp(large) " << (int64_t)_tsp << "->" << (int64_t)tsp;
+                    _tsp = tsp;
+                }
+                // 对于常见的几百毫秒级漂移，不再动态调整，完全依赖 FIFO 内部时间轴，
+                // 以避免频繁的小幅校正带来的听感断点。
+            }
+        } else {
+            _tsp = 0;
+        }
+
+        av_audio_fifo_write(_fifo, (void **)frame->data, frame->nb_samples);
+        return true;
+    }
+
+    bool Read(AVFrame *frame, int sample_size) {
+        assert(_fifo);
+        int fifo_size = av_audio_fifo_size(_fifo);
+        if (fifo_size < sample_size) {
+            return false;
+        }
+
+        av_samples_get_buffer_size(frame->linesize, _channels, sample_size, _format, 0);
+        frame->nb_samples = sample_size;
+        frame->format = _format;
+#if LIBAVCODEC_VERSION_INT >= FF_CODEC_VER_7_1
+        av_channel_layout_default(&frame->ch_layout, _channels);
+#else
+        frame->channel_layout = av_get_default_channel_layout(_channels);
+        frame->channels = _channels;
+#endif
+        frame->sample_rate = _samplerate;
+        if (fabs(_tsp) > DBL_EPSILON) {
+            frame->pts = _tsp;
+            _tsp += sample_size * _timebase;
+        } else {
+            frame->pts = AV_NOPTS_VALUE;
+        }
+
+        int ret = av_frame_get_buffer(frame, 0);
+        if (ret < 0) {
+            WarnL << "av_frame_get_buffer error " << ffmpeg_err(ret);
+            return false;
+        }
+
+        av_audio_fifo_read(_fifo, (void **)frame->data, sample_size);
+        return true;
+    }
+
+    int size() const {
+        return _fifo ? av_audio_fifo_size(_fifo) : 0;
+    }
+
+private:
+    int _channels = 0;
+    int _samplerate = 0;
+    double _tsp = 0;
+    double _timebase = 0;
+    AVAudioFifo *_fifo = nullptr;
+    AVSampleFormat _format = AV_SAMPLE_FMT_NONE;
+};
+
+static void setupEncoderContext(AVCodecContext *ctx, int bitrate) {
+#ifdef FF_API_OLD_ENCDEC
+    ctx->refcounted_frames = 1;
+#endif
+    ctx->flags |= AV_CODEC_FLAG_LOW_DELAY;
+    ctx->flags2 |= AV_CODEC_FLAG2_FAST;
+    ctx->strict_std_compliance = FF_COMPLIANCE_EXPERIMENTAL;
+    ctx->time_base.num = 1;
+    ctx->time_base.den = 1000;
+    ctx->bit_rate = bitrate;
+}
+
+FFmpegEncoder::FFmpegEncoder(const Track::Ptr &track, int thread_num) {
+    setupFFmpeg();
+    const AVCodec *codec = nullptr;
+    const AVCodec *codec_default = nullptr;
+    _codecId = track->getCodecId();
+    switch (_codecId) {
+    case CodecAAC:
+        codec = getCodec_l<false>(AV_CODEC_ID_AAC);
+        break;
+    case CodecG711A:
+        codec = getCodec_l<false>(AV_CODEC_ID_PCM_ALAW);
+        break;
+    case CodecG711U:
+        codec = getCodec_l<false>(AV_CODEC_ID_PCM_MULAW);
+        break;
+    case CodecOpus:
+        codec = getCodec_l<false>(AV_CODEC_ID_OPUS);
+        break;
+    default:
+        break;
+    }
+
+    if (!codec) {
+        throw std::runtime_error("未找到编码器");
+    }
+
+    if (thread_num <= 0) {
+        av_dict_set(&_dict, "threads", "auto", 0);
+    } else {
+        av_dict_set(&_dict, "threads", to_string(MIN(thread_num, (int)thread::hardware_concurrency())).data(), 0);
+    }
+    av_dict_set(&_dict, "zerolatency", "1", 0);
+
+    bool ok = false;
+    if (track->getTrackType() == TrackAudio) {
+        auto audio = std::dynamic_pointer_cast<AudioTrack>(track);
+        ok = openAudioCodec(audio->getAudioSampleRate(), audio->getAudioChannel(), track->getBitRate(), codec);
+    }
+
+    if (!ok) {
+        throw std::runtime_error(StrPrinter << "打开编码器" << codec->name << "失败");
+    }
+    _codec = codec;
+    if (getTrackType() == TrackAudio) {
+        var_frame_size = _context->codec->capabilities & AV_CODEC_CAP_VARIABLE_FRAME_SIZE;
+    }
+    InfoL << "打开编码器成功:" << codec->name;
+}
+
+FFmpegEncoder::~FFmpegEncoder() {
+    stopThread(true);
+    flush();
+    av_dict_free(&_dict);
+}
+
+void FFmpegEncoder::flush() {
+    while (true) {
+        auto packet = alloc_av_packet();
+        auto ret = avcodec_receive_packet(_context.get(), packet.get());
+        if (ret == AVERROR(EAGAIN)) {
+            avcodec_send_frame(_context.get(), nullptr);
+            continue;
+        }
+        if (ret == AVERROR_EOF) {
+            break;
+        }
+        if (ret < 0) {
+            WarnL << "avcodec_receive_packet failed:" << ffmpeg_err(ret);
+            break;
+        }
+        onEncode(packet.get());
+    }
+}
+
+CodecId FFmpegEncoder::getCodecId() const {
+    return _codecId;
+}
+
+const AVCodecContext *FFmpegEncoder::getContext() const {
+    return _context.get();
+}
+
+void FFmpegEncoder::setOnEncode(onEnc cb) {
+    _cb = std::move(cb);
+}
+
+bool FFmpegEncoder::inputFrame(const FFmpegFrame::Ptr &frame, bool async) {
+    if (async && !TaskManager::isEnabled() && getContext()->codec_type == AVMEDIA_TYPE_VIDEO) {
+        startThread("encoder thread");
+    }
+    if (!async || !TaskManager::isEnabled()) {
+        return inputFrame_l(frame);
+    }
+    auto frame_cache = frame;
+    return addEncodeTask([this, frame_cache]() { inputFrame_l(frame_cache); });
+}
+
+bool FFmpegEncoder::inputFrame_l(FFmpegFrame::Ptr input) {
+    AVFrame *frame = input->get();
+    AVCodecContext *context = _context.get();
+    if (getTrackType() == TrackAudio) {
+        if (_swr) {
+            input = _swr->inputFrame(input);
+            frame = input->get();
+            if (!var_frame_size && context->frame_size && frame->nb_samples != context->frame_size) {
+                if (!_fifo) {
+                    _fifo.reset(new FFmpegAudioFifo());
+                }
+                _fifo->Write(frame);
+                while (true) {
+                    FFmpegFrame audio_frame(std::shared_ptr<AVFrame>(av_frame_alloc(), [](AVFrame *ptr) { av_frame_free(&ptr); }));
+                    if (!_fifo->Read(audio_frame.get(), context->frame_size)) {
+                        break;
+                    }
+                    if (!encodeFrame(audio_frame.get())) {
+                        break;
+                    }
+                }
+                return true;
+            }
+        }
+    }
+    return encodeFrame(frame);
+}
+
+bool FFmpegEncoder::encodeFrame(AVFrame *frame) {
+    int ret = avcodec_send_frame(_context.get(), frame);
+    if (ret < 0) {
+        WarnL << "Error sending a frame " << frame->pts << " to the encoder: " << ffmpeg_err(ret);
+        return false;
+    }
+    while (ret >= 0) {
+        auto packet = alloc_av_packet();
+        ret = avcodec_receive_packet(_context.get(), packet.get());
+        if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) {
+            break;
+        } else if (ret < 0) {
+            WarnL << "Error encoding a frame: " << ffmpeg_err(ret);
+            return false;
+        }
+        onEncode(packet.get());
+    }
+    return true;
+}
+
+void FFmpegEncoder::onEncode(AVPacket *packet) {
+    if (!_cb) {
+        return;
+    }
+    if (_codecId == CodecAAC) {
+        auto frame = FrameImp::create<>();
+        frame->_codec_id = _codecId;
+        frame->_dts = packet->dts;
+        frame->_pts = packet->pts;
+        // leave ADTS header construction to caller if needed
+        frame->_buffer.assign((const char *)packet->data, packet->size);
+        _cb(frame);
+    } else {
+        _cb(Factory::getFrameFromPtr(_codecId, (const char *)packet->data, packet->size, packet->dts, packet->pts));
+    }
+}
+
+bool FFmpegEncoder::openAudioCodec(int samplerate, int channel, int bitrate, const AVCodec *codec) {
+    _context.reset(avcodec_alloc_context3(codec), [](AVCodecContext *ctx) { avcodec_free_context(&ctx); });
+    if (!_context) {
+        return false;
+    }
+    setupEncoderContext(_context.get(), bitrate);
+    _context->sample_fmt = codec->sample_fmts ? codec->sample_fmts[0] : AV_SAMPLE_FMT_FLTP;
+    _context->sample_rate = samplerate;
+
+#if LIBAVCODEC_VERSION_INT >= FF_CODEC_VER_7_1
+    av_channel_layout_default(&_context->ch_layout, channel);
+#else
+    _context->channels = channel;
+    _context->channel_layout = av_get_default_channel_layout(_context->channels);
+#endif
+
+    if (getCodecId() == CodecOpus) {
+        _context->compression_level = 1;
+    }
+
+    _swr.reset(new FFmpegSwr(_context->sample_fmt,
+#if LIBAVCODEC_VERSION_INT >= FF_CODEC_VER_7_1
+                             &_context->ch_layout,
+#else
+                             channel,
+                             _context->channel_layout,
+#endif
+                             _context->sample_rate));
+
+    InfoL << "openAudioCodec " << codec->name << " " << _context->sample_rate << "x" << channel;
+    return avcodec_open2(_context.get(), codec, &_dict) >= 0;
 }
 
 } // namespace mediakit
