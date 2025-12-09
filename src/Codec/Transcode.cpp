@@ -878,16 +878,27 @@ public:
             _timebase = 1000.0 / _samplerate;
         }
         if (frame->pts != AV_NOPTS_VALUE) {
-            double tsp = frame->pts - _timebase * av_audio_fifo_size(_fifo);
+            int fifo_samples = av_audio_fifo_size(_fifo);
+            double tsp = frame->pts - _timebase * fifo_samples;
             if (fabs(_tsp) < DBL_EPSILON) {
                 // 第一次初始化基准时间戳，后续主要依赖 FIFO 按采样数累加保持平滑
                 _tsp = tsp;
-                InfoL << "reset base_tsp " << 0 << "->" << (int64_t)tsp;
+                InfoL << "reset base_tsp " << 0 << "->" << (int64_t)tsp
+                      << ", frame_pts=" << (int64_t)frame->pts
+                      << ", fifo_samples=" << fifo_samples
+                      << ", samplerate=" << _samplerate
+                      << ", timebase=" << _timebase;
             } else {
                 double diff = tsp - _tsp;
-                // 仅在极端情况下（>5s 漂移）才做一次硬重置，避免时间轴完全跑飞
-                if (fabs(diff) > 5000) {
-                    InfoL << "reset base_tsp(large) " << (int64_t)_tsp << "->" << (int64_t)tsp;
+                // 仅在极端情况下（>|kResetDriftMs| 漂移）才做一次硬重置，避免时间轴完全跑飞
+                static const double kResetDriftMs = 500.0; // 你可以根据需要调整这个阈值
+                if (fabs(diff) > kResetDriftMs) {
+                    InfoL << "reset base_tsp(large) " << (int64_t)_tsp << "->" << (int64_t)tsp
+                          << ", diff=" << (int64_t)diff
+                          << ", frame_pts=" << (int64_t)frame->pts
+                          << ", fifo_samples=" << fifo_samples
+                          << ", samplerate=" << _samplerate
+                          << ", timebase=" << _timebase;
                     _tsp = tsp;
                 }
                 // 对于常见的几百毫秒级漂移，不再动态调整，完全依赖 FIFO 内部时间轴，

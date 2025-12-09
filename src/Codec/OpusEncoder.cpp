@@ -121,8 +121,10 @@ bool AudioTranscoder::inputFrame(const Frame::Ptr &frame) {
     
     _input_frame_count++;
     
-    // 输入帧到解码器（异步解码）
-    return _decoder->inputFrame(frame, true, true);
+    // 输入帧到解码器（同步解码，避免在音频路径上额外排队累积时延）
+    // old-transcode 中 RtcMediaSourceMuxer 使用 FFmpegDecoder::inputFrame(frame, true, false)
+    // 这里也采用 async=false 的方式，使音频转码行为更加一致
+    return _decoder->inputFrame(frame, true, false);
 }
 
 void AudioTranscoder::onDecoded(const FFmpegFrame::Ptr &pcm_frame) {
@@ -138,7 +140,9 @@ void AudioTranscoder::onDecoded(const FFmpegFrame::Ptr &pcm_frame) {
     
     // 编码为 Opus（异步编码）
     if (_encoder) {
-        _encoder->inputFrame(resampled, true);
+        // old-transcode 在 WebRTC 音频转码路径中使用同步编码（async=false），
+        // 这里同样关闭音频编码侧的异步队列，减少 FIFO 深度和大幅时间戳漂移的可能。
+        _encoder->inputFrame(resampled, false);
     }
 }
 
