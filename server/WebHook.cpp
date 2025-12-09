@@ -9,9 +9,14 @@
  */
 
 #include <sstream>
+#include <deque>
+#include <mutex>
+#include <unordered_map>
+#include <algorithm>
 #include "Util/logger.h"
 #include "Util/onceToken.h"
 #include "Util/NoticeCenter.h"
+#include "Util/TimeTicker.h"
 #include "Common/config.h"
 #include "Common/MediaSource.h"
 #include "Http/HttpSession.h"
@@ -33,6 +38,7 @@ const string kEnable = HOOK_FIELD "enable";
 const string kTimeoutSec = HOOK_FIELD "timeoutSec";
 const string kOnPublish = HOOK_FIELD "on_publish";
 const string kOnPlay = HOOK_FIELD "on_play";
+const string kOnPlayReport = HOOK_FIELD "on_play_report";
 const string kOnFlowReport = HOOK_FIELD "on_flow_report";
 const string kOnRtspRealm = HOOK_FIELD "on_rtsp_realm";
 const string kOnRtspAuth = HOOK_FIELD "on_rtsp_auth";
@@ -60,6 +66,7 @@ static onceToken token([]() {
     // Default hook address is set to empty, using default behavior (e.g. no authentication)
     mINI::Instance()[kOnPublish] = "";
     mINI::Instance()[kOnPlay] = "";
+    mINI::Instance()[kOnPlayReport] = "";
     mINI::Instance()[kOnFlowReport] = "";
     mINI::Instance()[kOnRtspRealm] = "";
     mINI::Instance()[kOnRtspAuth] = "";
@@ -330,6 +337,47 @@ static void pullStreamFromOrigin(const vector<string> &urls, size_t index, size_
 
 static void *web_hook_tag = nullptr;
 
+static std::mutex s_watcher_mtx;
+static std::deque<WatcherRecord> s_watchers;
+static constexpr size_t kMaxWatchers = 300;
+
+// cache: WebRTC signaling session_id -> real client ip
+static std::unordered_map<std::string, std::string> s_rtc_session_ip;
+
+static void recordWatcher(const MediaInfo &args, SockInfo &sender) {
+    WatcherRecord rec;
+    rec.ip = sender.get_peer_ip();
+    rec.port = sender.get_peer_port();
+    rec.id = sender.getIdentifier();
+    rec.protocol = args.schema;
+    rec.schema = args.schema;
+    rec.vhost = args.vhost;
+    rec.app = args.app;
+    rec.stream = args.stream;
+    rec.params = args.params;
+    // 使用系统时间戳（Unix 秒），与 MediaSource::getCreateStamp 的时间基准保持一致
+    rec.start_stamp = getCurrentMillisecond(true) / 1000;
+
+    std::lock_guard<std::mutex> lck(s_watcher_mtx);
+
+    // WebRTC 播放的真实 IP：通过 HTTP 信令阶段的 session → ip 映射反查
+    if (rec.schema == "rtc") {
+        auto kv = Parser::parseArgs(rec.params);
+        auto it = kv.find("session");
+        if (it != kv.end()) {
+            auto ip_it = s_rtc_session_ip.find(it->second);
+            if (ip_it != s_rtc_session_ip.end() && !ip_it->second.empty()) {
+                rec.ip = ip_it->second;
+            }
+        }
+    }
+
+    s_watchers.emplace_back(std::move(rec));
+    if (s_watchers.size() > kMaxWatchers) {
+        s_watchers.pop_front();
+    }
+}
+
 static mINI jsonToMini(const Value &obj) {
     mINI ret;
     if (obj.isObject()) {
@@ -378,6 +426,8 @@ void installWebHook() {
     });
 
     NoticeCenter::Instance().addListener(&web_hook_tag, Broadcast::kBroadcastMediaPlayed, [](BroadcastMediaPlayedArgs) {
+        recordWatcher(args, sender);
+
         GET_CONFIG(string, hook_play, Hook::kOnPlay);
         if (!hook_enable || hook_play.empty()) {
             invoker("");
@@ -392,6 +442,32 @@ void installWebHook() {
         do_http_hook(hook_play, body, [invoker](const Value &obj, const string &err) { invoker(err); });
     });
 
+    NoticeCenter::Instance().addListener(&web_hook_tag, Broadcast::kBroadcastMediaPlayed, [](BroadcastMediaPlayedArgs) {
+        GET_CONFIG(string, hook_play_report, Hook::kOnPlayReport);
+        if (!hook_enable || hook_play_report.empty()) {
+            return;
+        }
+        auto body = make_json(args);
+        // 默认使用会话层对端 IP；如果是 WebRTC，则优先使用 HTTP 信令阶段缓存的真实客户端 IP
+        string real_ip = sender.get_peer_ip();
+        if (args.schema == "rtc") {
+            auto kv = Parser::parseArgs(args.params);
+            auto it = kv.find("session");
+            if (it != kv.end()) {
+                auto ip_it = s_rtc_session_ip.find(it->second);
+                if (ip_it != s_rtc_session_ip.end() && !ip_it->second.empty()) {
+                    real_ip = ip_it->second;
+                }
+            }
+        }
+        body["ip"] = real_ip;
+        body["port"] = sender.get_peer_port();
+        body["id"] = sender.getIdentifier();
+        // 执行hook  [AUTO-TRANSLATED:1df68201]
+        // Execute hook
+        do_http_hook(hook_play_report, body, nullptr);
+    });
+
     NoticeCenter::Instance().addListener(&web_hook_tag, Broadcast::kBroadcastFlowReport, [](BroadcastFlowReportArgs) {
         GET_CONFIG(string, hook_flowreport, Hook::kOnFlowReport);
         if (!hook_enable || hook_flowreport.empty()) {
@@ -401,7 +477,20 @@ void installWebHook() {
         body["totalBytes"] = (Json::UInt64)totalBytes;
         body["duration"] = (Json::UInt64)totalDuration;
         body["player"] = isPlayer;
-        body["ip"] = sender.get_peer_ip();
+        // 默认使用会话层的对端 IP；对 WebRTC 播放则尝试使用 HTTP 信令阶段缓存的真实客户端 IP
+        string real_ip = sender.get_peer_ip();
+        if (args.schema == "rtc") {
+            auto kv = Parser::parseArgs(args.params);
+            auto it = kv.find("session");
+            if (it != kv.end()) {
+                auto ip_it = s_rtc_session_ip.find(it->second);
+                if (ip_it != s_rtc_session_ip.end() && !ip_it->second.empty()) {
+                    real_ip = ip_it->second;
+                }
+            }
+        }
+
+        body["ip"] = real_ip;
         body["port"] = sender.get_peer_port();
         body["id"] = sender.getIdentifier();
         // 执行hook  [AUTO-TRANSLATED:1df68201]
@@ -770,4 +859,17 @@ void unInstallWebHook() {
 
 void onProcessExited() {
     reportServerExited();
+}
+
+void getWatchers(std::vector<WatcherRecord> &out) {
+    std::lock_guard<std::mutex> lck(s_watcher_mtx);
+    out.assign(s_watchers.begin(), s_watchers.end());
+}
+
+void setRtcSessionPeerIp(const std::string &session_id, const std::string &ip) {
+    if (session_id.empty() || ip.empty()) {
+        return;
+    }
+    std::lock_guard<std::mutex> lck(s_watcher_mtx);
+    s_rtc_session_ip[session_id] = ip;
 }

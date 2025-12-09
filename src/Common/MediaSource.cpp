@@ -482,7 +482,14 @@ MediaSource::Ptr MediaSource::find(const string &vhost, const string &app, const
     if (src) {
         return src;
     }
-    return MediaSource::find(HLS_FMP4_SCHEMA, vhost, app, stream_id, from_mp4);
+    src = MediaSource::find(HLS_FMP4_SCHEMA, vhost, app, stream_id, from_mp4);
+    if (src) {
+        return src;
+    }
+    // 旧版本的“无 schema 查找”未包含 rtc 协议，这会导致 rtc 流无法通过
+    // MediaSource::find(vhost, app, stream_id) 被找到（例如 watcher 统计场景）。
+    // 这里补充对 RTC_SCHEMA 的查找，以便 rtc 流也能被通用逻辑识别。
+    return MediaSource::find(RTC_SCHEMA, vhost, app, stream_id, from_mp4);
 }
 
 void MediaSource::emitEvent(bool regist){

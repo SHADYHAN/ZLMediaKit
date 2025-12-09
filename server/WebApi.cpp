@@ -975,6 +975,84 @@ void installWebApi() {
         }, allArgs["schema"], allArgs["vhost"], allArgs["app"], allArgs["stream"]);
     });
 
+    // 获取带 watcher 信息的流列表（在 getMediaList 基础上做轻量级 join）
+    api_regist("/index/api/getMediaListWithWatchers",[](API_ARGS_MAP){
+        CHECK_SECRET();
+
+        // 预先获取当前 watcher 列表，并按 vhost/app/stream 建索引，供后续 join 使用
+        std::vector<WatcherRecord> watchers;
+        getWatchers(watchers);
+
+        using WatcherPtrList = std::vector<const WatcherRecord *>;
+        std::unordered_map<std::string, std::unordered_map<std::string, std::unordered_map<std::string, WatcherPtrList>>> watcher_index;
+
+        for (const auto &rec : watchers) {
+            // 对于非 rtc 协议，仅保留当前仍在线的会话对应的记录
+            if (rec.schema != "rtc" && rec.protocol != "rtc") {
+                auto session = SessionMap::Instance().get(rec.id);
+                if (!session) {
+                    continue;
+                }
+            }
+
+            // 仅索引当前还存在的流对应的观看记录
+            if (!MediaSource::find(rec.vhost, rec.app, rec.stream)) {
+                continue;
+            }
+
+            auto &by_app = watcher_index[rec.vhost];
+            auto &by_stream = by_app[rec.app];
+            by_stream[rec.stream].emplace_back(&rec);
+        }
+
+        // 获取所有MediaSource列表，并为每条流附加 watcher 统计信息
+        MediaSource::for_each_media([&](const MediaSource::Ptr &media) {
+            auto item = makeMediaSourceJson(*media);
+
+            const auto &tuple = media->getMediaTuple();
+            auto it_vhost = watcher_index.find(tuple.vhost);
+            if (it_vhost != watcher_index.end()) {
+                auto it_app = it_vhost->second.find(tuple.app);
+                if (it_app != it_vhost->second.end()) {
+                    auto it_stream = it_app->second.find(tuple.stream);
+                    if (it_stream != it_app->second.end()) {
+                        const auto &vec = it_stream->second;
+                        if (!vec.empty()) {
+                            // watchers: 当前该流的观看者明细列表，仅保留关键字段，避免与上层媒体字段重复
+                            // 规则：最多返回前4个(最早) + 最新1个，如果总数 <=4 则全部返回
+                            Value watcher_array(arrayValue);
+
+                            size_t n = vec.size();
+                            size_t max_first = std::min<size_t>(4, n);
+
+                            // 前4个(或更少)
+                            for (size_t i = 0; i < max_first; ++i) {
+                                auto *w = vec[i];
+                                Value wj;
+                                wj["ip"] = w->ip;
+                                wj["port"] = w->port;
+                                watcher_array.append(std::move(wj));
+                            }
+
+                            // 最新1个（如果总数大于前4个）
+                            if (n > max_first) {
+                                auto *w = vec.back();
+                                Value wj;
+                                wj["ip"] = w->ip;
+                                wj["port"] = w->port;
+                                watcher_array.append(std::move(wj));
+                            }
+
+                            item["watchers"] = std::move(watcher_array);
+                        }
+                    }
+                }
+            }
+
+            val["data"].append(std::move(item));
+        }, allArgs["schema"], allArgs["vhost"], allArgs["app"], allArgs["stream"]);
+    });
+
     // 测试url http://127.0.0.1/index/api/isMediaOnline?schema=rtsp&vhost=__defaultVhost__&app=live&stream=obs  [AUTO-TRANSLATED:126a75e8]
     // Test url http://127.0.0.1/index/api/isMediaOnline?schema=rtsp&vhost=__defaultVhost__&app=live&stream=obs
     api_regist("/index/api/isMediaOnline",[](API_ARGS_MAP){
@@ -1122,6 +1200,63 @@ void installWebApi() {
             jsession["typeid"] = toolkit::demangle(typeid(*session).name());
             val["data"].append(jsession);
         });
+    });
+
+    api_regist("/index/api/getWatchers", [](API_ARGS_MAP) {
+        CHECK_SECRET();
+        std::vector<WatcherRecord> records;
+        getWatchers(records);
+
+        const std::string filter_schema = allArgs["schema"];
+        const std::string filter_vhost = allArgs["vhost"];
+        const std::string filter_app = allArgs["app"];
+        const std::string filter_stream = allArgs["stream"];
+        const std::string filter_ip = allArgs["ip"];
+
+        for (const auto &rec : records) {
+            if (!filter_schema.empty() && rec.schema != filter_schema) {
+                continue;
+            }
+            if (!filter_vhost.empty() && rec.vhost != filter_vhost) {
+                continue;
+            }
+            if (!filter_app.empty() && rec.app != filter_app) {
+                continue;
+            }
+            if (!filter_stream.empty() && rec.stream != filter_stream) {
+                continue;
+            }
+            if (!filter_ip.empty() && rec.ip != filter_ip) {
+                continue;
+            }
+
+            // 对于非 rtc 协议，仅保留当前仍在线的会话对应的记录
+            if (rec.schema != "rtc" && rec.protocol != "rtc") {
+                auto session = SessionMap::Instance().get(rec.id);
+                if (!session) {
+                    continue;
+                }
+            }
+
+            // 仅返回当前还存在的流对应的观看记录
+            if (!MediaSource::find(rec.vhost, rec.app, rec.stream)) {
+                continue;
+            }
+
+            Value item;
+            item["schema"] = rec.schema;
+            item[VHOST_KEY] = rec.vhost;
+            item["app"] = rec.app;
+            item["stream"] = rec.stream;
+            item["ip"] = rec.ip;
+            item["port"] = rec.port;
+            item["id"] = rec.id;
+            item["protocol"] = rec.protocol;
+            item["params"] = rec.params;
+            item["start_stamp"] = (Json::UInt64)rec.start_stamp;
+
+            val["data"].append(item);
+        }
     });
 
     // 断开tcp连接，比如说可以断开rtsp、rtmp播放器等  [AUTO-TRANSLATED:9147ffec]
@@ -2107,7 +2242,31 @@ void installWebApi() {
         CHECK(!offer.empty(), "http body(webrtc offer sdp) is empty");
 
         auto &session = static_cast<Session&>(sender);
-        auto args = std::make_shared<WebRtcArgsImp>(allArgs, sender.getIdentifier());
+        auto session_id = sender.getIdentifier();
+
+        // Prefer real client ip from HTTP headers, then fall back to socket ip
+        std::string real_ip;
+        auto &parser = allArgs.parser;
+        auto &headers = parser.getHeader();
+
+        real_ip = headers["X-Real-IP"];
+        if (real_ip.empty()) {
+            auto xff = headers["X-Forwarded-For"];
+            if (!xff.empty()) {
+                auto pos = xff.find(',');
+                if (pos != std::string::npos) {
+                    real_ip = xff.substr(0, pos);
+                } else {
+                    real_ip = xff;
+                }
+            }
+        }
+        if (real_ip.empty()) {
+            real_ip = session.get_peer_ip();
+        }
+
+        auto args = std::make_shared<WebRtcArgsImp>(allArgs, session_id);
+        setRtcSessionPeerIp(session_id, real_ip);
         WebRtcPluginManager::Instance().negotiateSdp(session, type, *args, [invoker, val, offer, headerOut](const WebRtcInterface &exchanger) mutable {
             auto &handler = const_cast<WebRtcInterface &>(exchanger);
             try {
@@ -2129,8 +2288,34 @@ void installWebApi() {
         CHECK(!offer.empty(), "http body(webrtc offer sdp) is empty");
 
         auto &session = static_cast<Session&>(sender);
+        auto session_id = sender.getIdentifier();
+
+        // 与 /index/api/webrtc 保持一致：优先从 HTTP 头获取真实客户端 IP
+        std::string real_ip;
+        auto &parser = allArgs.parser;
+        auto &headers = parser.getHeader();
+
+        real_ip = headers["X-Real-IP"];
+        if (real_ip.empty()) {
+            auto xff = headers["X-Forwarded-For"];
+            if (!xff.empty()) {
+                auto pos = xff.find(',');
+                if (pos != std::string::npos) {
+                    real_ip = xff.substr(0, pos);
+                } else {
+                    real_ip = xff;
+                }
+            }
+        }
+        if (real_ip.empty()) {
+            real_ip = session.get_peer_ip();
+        }
+
+        // 缓存 WHIP/WHEP 的真实客户端 IP，供后续 rtc 播放 hook 使用
+        setRtcSessionPeerIp(session_id, real_ip);
+
         auto location = std::string(session.overSsl() ? "https://" : "http://") + allArgs["host"] + delete_webrtc_url;
-        auto args = std::make_shared<WebRtcArgsImp>(allArgs, sender.getIdentifier());
+        auto args = std::make_shared<WebRtcArgsImp>(allArgs, session_id);
         WebRtcPluginManager::Instance().negotiateSdp(session, type, *args, [invoker, offer, headerOut, location](const WebRtcInterface &exchanger) mutable {
             auto &handler = const_cast<WebRtcInterface &>(exchanger);
             try {
